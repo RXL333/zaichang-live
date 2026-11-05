@@ -1,8 +1,9 @@
 services:
   - type: web
-    name: tongpin-live
+    name: zaichang-live
     runtime: docker
     plan: free
+    region: singapore
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/system/status
     envVars:
