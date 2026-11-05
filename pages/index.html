@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f3eb">
+  <title>在场 LIVE · 让分享发生在现场</title>
+  <meta name="description" content="发现正在直播的内容，与创作者实时交流。">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f6f3eb;color:#25221e;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}a{color:inherit}header{height:76px;border-bottom:1px solid #e7e1d5;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(24px,6vw,96px);background:#fffefa}.brand{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:850;letter-spacing:-1px}.mark{width:36px;height:36px;background:#25221e;color:#d9e96c;border-radius:11px;display:grid;place-items:center;transform:rotate(-7deg)}.brand small{font-size:10px;color:#bf3d2b;letter-spacing:.08em}.header-note{font-size:11px;color:#817a6e;letter-spacing:.12em;font-weight:700}.wrap{max-width:1220px;padding:42px 24px;margin:auto}.hero{min-height:510px;border-radius:22px;background:#eae7db;position:relative;overflow:hidden;display:flex;align-items:center;padding:clamp(30px,7vw,86px)}.copy{max-width:630px;z-index:1}.eyebrow{font-size:11px;letter-spacing:.16em;color:#6d685e;font-weight:800;display:flex;align-items:center;gap:10px}.dot{width:8px;height:8px;background:#c43f2b;border-radius:50%}h1{font-size:clamp(42px,6vw,76px);letter-spacing:-.06em;line-height:1.12;margin:28px 0 20px}h1 span{color:#be3f2b}.lead{font-size:15px;line-height:1.9;color:#716b60}.button{display:inline-flex;align-items:center;justify-content:center;gap:18px;text-decoration:none;background:#c43f2b;color:#fff;padding:15px 20px;border-radius:10px;font-size:14px;font-weight:750;margin-top:30px;transition:transform .2s,background .2s}.button:hover{background:#a83423;transform:translateY(-2px)}.status{display:inline-flex;align-items:center;gap:10px;margin-top:30px;padding:15px 17px;border:1px solid #d8d3c5;border-radius:10px;color:#665f54;font-size:13px;font-weight:650}.status:before{content:"";width:7px;height:7px;background:#c43f2b;border-radius:50%}.line-art{position:absolute;right:5%;top:16%;width:38%;max-width:390px;opacity:.95}.footer{display:flex;justify-content:space-between;gap:20px;margin-top:26px;color:#888174;font-size:11px}.footer strong{color:#4d483f}.hidden{display:none}@media(max-width:720px){header{height:65px}.header-note{display:none}.wrap{padding:15px}.hero{min-height:650px;align-items:flex-start;padding:38px 25px}.line-art{width:78%;right:8%;top:auto;bottom:6%}h1{font-size:43px}.footer{margin:22px 8px;line-height:1.7}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+  <script src="./config.js" defer></script>
+</head>
+<body>
+  <header><div class="brand"><span class="mark"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span>在场 <small>LIVE</small></span></div><span class="header-note">LIVE · CONNECT · SHARE</span></header>
+  <main class="wrap"><section class="hero"><div class="copy"><div class="eyebrow"><span class="dot"></span> LIVE STREAMING <span>—</span> 实时直播</div><h1>精彩内容，<br><span>值得在场。</span></h1><p class="lead">发现正在直播的内容，<br>与创作者实时交流。</p><a id="enter" class="button hidden" href="#">进入直播 <span aria-hidden="true">↗</span></a><div id="status" class="status" role="status">直播服务正在准备中，请稍后再来。</div></div>
+    <svg class="line-art" viewBox="0 0 400 340" fill="none" aria-hidden="true"><rect x="24" y="42" width="340" height="230" rx="26" fill="#27241f"/><rect x="37" y="55" width="314" height="204" rx="16" fill="#c43f2b"/><rect x="49" y="67" width="290" height="180" rx="10" stroke="#f5d5c5" stroke-opacity=".5"/><path d="M73 158h16m10-15v30m12-44v58m12-78v98m12-65v32m12-97v162m12-115v68m12-104v140m12-86v34m12-75v116m12-87v58m12-43v28m12-21v14" stroke="#f9eadf" stroke-width="5" stroke-linecap="round"/><path d="M103 299h184M160 272v27m70-27v27" stroke="#27241f" stroke-width="8" stroke-linecap="round"/><circle cx="310" cy="101" r="7" fill="#d9e96c"/></svg>
+  </section><div class="footer"><strong>✳ 在场 LIVE</strong><span>分享正在发生的事。</span></div></main>
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      const target = window.ZAICHANG_LIVE_URL
+      if (!target) return
+      try {
+        const url = new URL(target)
+        if (url.protocol !== 'https:') return
+        const enter = document.getElementById('enter')
+        enter.href = url.href; enter.classList.remove('hidden'); document.getElementById('status').classList.add('hidden')
+        location.replace(url.href)
+      } catch (_) { /* Keep the waiting message when configuration is incomplete. */ }
+    })
+  </script>
+</body>
+</html>

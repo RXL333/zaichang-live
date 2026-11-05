@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>画面布局测试</title><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="padding:20px"><main id="app" style="max-width:800px;margin:auto"></main>
+  <script type="module">
+    import { createApp, h, markRaw } from 'vue'
+    import { Track } from 'livekit-client'
+    import MediaStage from '../src/components/MediaStage.vue'
+    import '../src/style.css'
+    function participant(name, color, id) {
+      const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = color; ctx.fillRect(0,0,640,360); ctx.fillStyle = '#211e1a'; ctx.font = '40px sans-serif'; ctx.fillText(name,240,180)
+      const stream = canvas.captureStream(5)
+      const track = { kind:Track.Kind.Video, sid:id, attach(element) { element.srcObject = stream }, detach(element) { element.srcObject = null } }
+      return { name, trackPublications:new Map([[id, { track, trackSid:id, source:Track.Source.Camera, isMuted:false }]]) }
+    }
+    const local = participant('主播', '#d9e96c', 'host'), guest = participant('嘉宾', '#eab5a3', 'guest')
+    const room = markRaw({ localParticipant:local, remoteParticipants:new Map([['guest',guest]]), canPlaybackAudio:true, on() {}, off() {} })
+    createApp({ render() { return h(MediaStage, { room, status:'LIVE', includeLocal:true }) } }).mount('#app')
+  </script>
+</body>
+</html>

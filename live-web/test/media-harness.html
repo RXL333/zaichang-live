@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>本地媒体联调</title></head>
+<body>
+  <h1>本地媒体联调</h1>
+  <p>此页面仅用于开发测试，发布合成画面和静音音轨，不会使用摄像头或麦克风。</p>
+  <label>直播间编号 <input id="room" /></label>
+  <button id="start">开始合成直播</button><button id="stop" disabled>结束合成直播</button>
+  <p id="status" role="status">等待开始</p><a id="watch" hidden target="_blank">打开观看页</a>
+  <canvas id="canvas" width="640" height="360" style="display:block;max-width:100%;margin-top:12px"></canvas>
+  <script type="module">
+    import { Room } from 'livekit-client'
+    let connection, stream, audioContext, sessionId, frame
+    const roomInput = document.querySelector('#room'), status = document.querySelector('#status'), start = document.querySelector('#start'), stop = document.querySelector('#stop'), canvas = document.querySelector('#canvas')
+    async function post(path, body = {}) {
+      const token = await (await fetch('/api/csrf')).json()
+      const response = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json',[token.headerName]:token.token}, body: JSON.stringify(body) })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message || `请求失败 ${response.status}`)
+      return response.json()
+    }
+    function draw() {
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#211e1a'; ctx.fillRect(0,0,640,360)
+      ctx.fillStyle = '#d9e96c'; ctx.font = 'bold 36px sans-serif'; ctx.fillText('本地合成媒体测试', 120, 155)
+      ctx.fillStyle = '#ffffff'; ctx.font = '24px sans-serif'; ctx.fillText(new Date().toLocaleTimeString(), 250, 215)
+      frame = requestAnimationFrame(draw)
+    }
+    start.addEventListener('click', async () => {
+      start.disabled = true
+      try {
+        const created = await post(`/api/rooms/${roomInput.value}/sessions`); sessionId = created.id
+        const credentials = await post(`/api/sessions/${sessionId}/media-token`, { role:'host' })
+        connection = new Room(); await connection.connect(credentials.url, credentials.token)
+        draw(); stream = canvas.captureStream(12)
+        await connection.localParticipant.publishTrack(stream.getVideoTracks()[0])
+        audioContext = new AudioContext(); const oscillator = audioContext.createOscillator(), gain = audioContext.createGain(), destination = audioContext.createMediaStreamDestination()
+        gain.gain.value = 0; oscillator.connect(gain); gain.connect(destination); oscillator.start(); stream.addTrack(destination.stream.getAudioTracks()[0])
+        await connection.localParticipant.publishTrack(destination.stream.getAudioTracks()[0])
+        await post(`/api/sessions/${sessionId}/activate`)
+        status.textContent = '合成直播已开始'; document.querySelector('#watch').href = `/room/${roomInput.value}`; document.querySelector('#watch').hidden = false; stop.disabled = false
+      } catch (error) { status.textContent = `启动失败：${error.message}`; await connection?.disconnect(); start.disabled = false }
+    })
+    stop.addEventListener('click', async () => {
+      try { await post(`/api/sessions/${sessionId}/end`); status.textContent = '合成直播已结束' }
+      catch (error) { status.textContent = `结束失败：${error.message}` }
+      await connection?.disconnect(); stream?.getTracks().forEach(track => track.stop()); await audioContext?.close(); cancelAnimationFrame(frame); stop.disabled = true; start.disabled = false
+    })
+  </script>
+</body>
+</html>

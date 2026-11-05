@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>合成连麦测试</title></head>
+<body>
+  <h1>合成连麦测试</h1>
+  <p>仅用于本机测试；合成画面，不使用摄像头或麦克风。</p>
+  <label>直播间编号 <input id="room" /></label>
+  <button id="apply">连接并申请</button>
+  <button id="confirm" disabled>确认合成连麦</button>
+  <button id="end" disabled>结束连麦测试</button>
+  <p id="status" role="status">等待开始</p><canvas id="canvas" width="320" height="180"></canvas>
+  <script type="module">
+    import { Room } from 'livekit-client'
+    const byId = id => document.getElementById(id), status = byId('status')
+    let connection, socket, requestId, stream
+    async function post(path, body) {
+      const token = await (await fetch('/api/csrf')).json()
+      const response = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json',[token.headerName]:token.token}, body:JSON.stringify(body) })
+      if (!response.ok) throw new Error((await response.json()).message || '请求失败')
+      return response.json()
+    }
+    byId('apply').addEventListener('click', async () => {
+      byId('apply').disabled = true
+      try {
+        const roomId = byId('room').value, detail = await (await fetch(`/api/rooms/${roomId}`)).json(), sid = detail.sessionId
+        const credentials = await post(`/api/sessions/${sid}/media-token`, { role:'viewer' })
+        connection = new Room(); await connection.connect(credentials.url, credentials.token)
+        socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/live`)
+        socket.onopen = () => { socket.send(JSON.stringify({ type:'JOIN', roomId, sessionId:sid })); socket.send(JSON.stringify({ type:'MIC_APPLY', identity:credentials.identity })) }
+        socket.onmessage = async ({ data }) => {
+          const event = JSON.parse(data)
+          if (event.type === 'ERROR') status.textContent = `失败：${event.message}`
+          if (event.type === 'MIC_APPROVED' && event.identity === credentials.identity) { requestId = event.requestId; byId('confirm').disabled = false; status.textContent = '已获批准，等待确认' }
+          if (event.type === 'MIC_CONFIRMED' && event.identity === credentials.identity) {
+            const canvas = byId('canvas'), context = canvas.getContext('2d'); context.fillStyle = '#d9e96c'; context.fillRect(0,0,320,180); context.fillStyle = '#1d1b18'; context.font = '24px sans-serif'; context.fillText('合成连麦画面', 70, 95)
+            stream = canvas.captureStream(5); await connection.localParticipant.publishTrack(stream.getVideoTracks()[0]); status.textContent = '合成连麦已发布'; byId('end').disabled = false
+          }
+        }
+        status.textContent = '申请已提交'
+      } catch (error) { status.textContent = `失败：${error.message}`; byId('apply').disabled = false }
+    })
+    byId('confirm').addEventListener('click', () => { byId('confirm').disabled = true; socket.send(JSON.stringify({ type:'MIC_CONFIRM', requestId })) })
+    byId('end').addEventListener('click', async () => { socket.send(JSON.stringify({ type:'MIC_END', requestId })); await connection.disconnect(); stream?.getTracks().forEach(track => track.stop()); socket.close(); byId('end').disabled = true; status.textContent = '合成连麦已结束' })
+  </script>
+</body>
+</html>
