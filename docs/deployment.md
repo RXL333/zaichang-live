@@ -42,3 +42,9 @@ GitHub Pages 为免费个人账号提供公开仓库站点；具体使用限制�
 - 增加正式运营需要的审计、内容审核、请求限流、监控告警、数据保留与恢复策略。
 
 本地 Docker Compose 和生产 Docker 镜像的实际启动仍需在具备 Docker 引擎的环境验证，不能仅凭配置通过检查就视为部署成功。
+
+## 免费额度与限制
+
+- [Render 免费服务](https://render.com/docs/free)：工作区内所有免费 Web 服务共享每月 750 小时；空闲 15 分钟后休眠，首次访问可能需要约一分钟唤醒。带宽或构建额度超限后，如果账户已添加付款方式可能产生费用；请在 Render 控制台核对当前额度和账单设置。免费 Render Postgres 30 天后到期，因此这里选择 Supabase，而不使用它保存长期数据。
+- [Supabase 免费项目](https://supabase.com/docs/guides/platform/free-project-pausing)：数据库活动长期不足时可能暂停，需要在控制台恢复；定期备份重要数据。
+- [LiveKit Cloud Build 免费额度](https://docs.livekit.io/deploy/admin/quotas-and-limits/)：当前包括每月 5,000 参与者分钟及 50 GB 下行流量。每个连接各自计时，例如一位主播和五位观众同时在线 30 分钟约使用 180 参与者分钟；达到免费额度后新请求会受限。实际额度以服务商控制台为准。
