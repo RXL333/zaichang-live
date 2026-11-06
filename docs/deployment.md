@@ -28,7 +28,7 @@ GitHub Pages 为免费个人账号提供公开仓库站点；具体使用限制�
 | `LIVEKIT_API_SECRET` | 对应的 LiveKit API secret |
 | `APP_PUBLIC_ORIGIN` | 可选。默认使用 Render 提供的 `RENDER_EXTERNAL_URL`；使用自定义域名时设为实际的 `https://域名`，不要带路径或末尾斜杠 |
 
-4. 如果使用 Supabase，按其项目提供的连接信息选择适用于长期运行服务器的连接方式，并检查 IPv4、连接池和 TLS 要求；连接池端口、用户名和数据库名可能与直连地址不同。
+4. 如果使用 Supabase，建议为本项目单独创建免费项目并关闭 Data API，避免将本项目的表直接暴露到自动生成的接口；本应用通过后端 JDBC 访问数据库，不需要 Data API。按项目提供的连接信息选择适用于长期运行服务器的连接方式，并检查 IPv4、连接池和 TLS 要求；连接池端口、用户名和数据库名可能与直连地址不同。
 5. 在 LiveKit 项目的 Webhook 配置中添加 `https://你的域名/api/livekit/webhook`。后端会验证签名；即使 Webhook 延迟，也会定期核对媒体连接状态。
 6. 完成部署后访问 `/api/system/status`，再用实际的主播和观众设备检查注册、开播、播放、互动、连麦及结束直播。测试手机和校园网时使用真实的公网 HTTPS 地址。
 
