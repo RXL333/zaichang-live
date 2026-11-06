@@ -4,6 +4,8 @@
 
 [GitHub Pages 入口](https://rxl333.github.io/zaichang-live/)会进入部署在 Render 的完整网站。网站数据库使用 Neon PostgreSQL，音视频使用 LiveKit Cloud。
 
+[光标构建展示](https://rxl333.github.io/zaichang-live/showcase/)是独立的纯前端概念演示，展示直播大厅、观看页和主播工作台。页面里的画面、聊天与设备操作均为示例，不连接直播服务。光标动画根据交互思路独立实现，不包含 Swarm Rebuild 的源码。
+
 目前已经实现账号注册登录、房间与关注、直播与屏幕共享、聊天弹幕、点赞、免费礼物、投票、提问、连麦申请与主播审核等功能。云端服务已启动，真实设备、多设备长时间运行以及完整公网互动仍需按 [验证记录](docs/verification.md) 完成验收，请勿将本项目视为已经通过生产环境验证的服务。
 
 ## 运行环境
