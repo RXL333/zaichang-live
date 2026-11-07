@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RoomEvent, Track } from 'livekit-client'
 import { Radio, Volume2, VolumeX, Maximize, MessageSquare, MessageSquareOff, LayoutGrid } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
-const props = defineProps({ room: Object, status: { type: String, default: 'OFFLINE' }, includeLocal: Boolean, danmaku: { type: Boolean, default: true }, controls: { type: Boolean, default: true } })
+const props = defineProps({ room: Object, status: { type: String, default: 'OFFLINE' }, mediaState: String, includeLocal: Boolean, danmaku: { type: Boolean, default: true }, controls: { type: Boolean, default: true } })
 const emit = defineEmits(['toggle-danmaku'])
 const stage = ref(null), videos = ref([]), muted = ref(false), volume = ref(1), audioReady = ref(true), layout = ref('auto')
 let audioTracks = [], listeners = []
@@ -45,7 +45,7 @@ onBeforeUnmount(() => unlisten(props.room))
 <template>
   <div ref="stage" class="media-stage" :class="{ 'has-video': ordered.length }">
     <div v-if="ordered.length" class="video-grid" :class="{ 'with-focus': focusLayout, 'single-video': ordered.length === 1 }"><div v-for="item in ordered" :key="item.key" class="video-tile" :class="{ 'screen-tile': item.screen }"><MediaTile :track="item.track" muted /><span class="video-name">{{ item.screen ? '屏幕分享 · ' : '' }}{{ item.name }}</span></div></div>
-    <div v-else class="stage-empty"><div class="stage-icon"><Radio :size="28" /></div><strong>{{ status === 'RECONNECTING' ? '画面正在恢复中' : status === 'PREPARING' ? '主播正在准备' : status === 'LIVE' ? '正在连接直播画面' : '直播尚未开始' }}</strong><span>{{ status === 'OFFLINE' ? '请稍后访问。' : '请稍候。' }}</span></div>
+    <div v-else class="stage-empty"><div class="stage-icon"><Radio :size="28" /></div><strong>{{ status === 'RECONNECTING' ? '画面正在恢复中' : status === 'PREPARING' ? '主播正在准备' : status === 'LIVE' && mediaState === 'connected' ? '主播暂未开启画面' : status === 'LIVE' ? '正在连接直播画面' : '直播尚未开始' }}</strong><span>{{ status === 'OFFLINE' ? '请稍后访问。' : status === 'LIVE' && mediaState === 'connected' ? '直播正在进行中。' : '请稍候。' }}</span></div>
     <slot />
     <button v-if="!audioReady" class="sound-unlock" @click="startAudio"><Volume2 :size="16" /> 点击开启声音</button>
     <div v-if="controls" class="stage-controls"><button class="stage-control" :aria-label="muted ? '开启声音' : '静音'" @click="sound"><VolumeX v-if="muted" :size="18" /><Volume2 v-else :size="18" /></button><input v-model.number="volume" class="volume-slider" type="range" min="0" max="1" step="0.05" aria-label="音量" /><button class="stage-control" :aria-label="danmaku ? '关闭弹幕' : '开启弹幕'" @click="emit('toggle-danmaku')"><MessageSquare v-if="danmaku" :size="18" /><MessageSquareOff v-else :size="18" /><span>弹幕</span></button><span class="stage-controls-spacer"></span><button v-if="ordered.length > 1" class="stage-control" :aria-label="focusLayout ? '切换为并排布局' : '切换为主画面布局'" @click="toggleLayout"><LayoutGrid :size="18" /><span>布局</span></button><button class="stage-control" aria-label="全屏" @click="fullscreen"><Maximize :size="18" /></button></div>

@@ -10,5 +10,7 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.flying-danmaku,.reaction-layer{display:none}}
 .studio-controls{flex-wrap:wrap}
 .studio-controls .control-button:disabled{opacity:.5;cursor:not-allowed}
+.capture-note{display:flex;align-items:flex-start;gap:8px;margin-top:13px;padding:10px 12px;border-radius:9px;background:#f0f2df;color:#536138;font-size:11px;line-height:1.6}.capture-note svg{flex:none;margin-top:1px}
+.chat-update{position:relative;z-index:2;display:flex;justify-content:center;margin:-36px 0 8px;pointer-events:none}.chat-update button{pointer-events:auto;border:1px solid #e9d4ca;border-radius:99px;background:#fffaf6;color:#a83f2d;padding:7px 13px;font-size:11px;font-weight:750;box-shadow:0 5px 18px #3022181a;transition:transform .2s,box-shadow .2s}.chat-update button:hover{transform:translateY(-2px);box-shadow:0 8px 22px #30221824}
 @media(min-width:701px) and (max-width:980px){.topbar{gap:14px;padding:0 20px}.top-nav{gap:14px}.search-box{width:clamp(150px,20vw,200px);min-width:0}.login-button{display:inline-flex}}
 @media(max-width:700px){.studio-controls .controls-spacer{display:none}.studio-controls .control-button{min-width:45px;min-height:44px}.studio-controls>.button{margin-left:auto;min-height:44px}}

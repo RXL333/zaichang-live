@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
-import { Room, RoomEvent } from 'livekit-client'
+import { Room, RoomEvent, Track, createLocalScreenTracks } from 'livekit-client'
 import { api } from '../api'
 import { useUser } from '../stores/user'
 import StudioView from './StudioView.vue'
@@ -19,15 +19,16 @@ vi.mock('livekit-client', () => {
     static nextConnect = null
     constructor() {
       this.handlers = {}
-      this.localParticipant = { setCameraEnabled: vi.fn().mockResolvedValue(), setMicrophoneEnabled: vi.fn().mockResolvedValue() }
+      this.localParticipant = { setCameraEnabled: vi.fn().mockResolvedValue(), setMicrophoneEnabled: vi.fn().mockResolvedValue(), isScreenShareEnabled: false }
+      this.localParticipant.publishTrack = vi.fn().mockImplementation(async track => { if (track.source === 'screen_share') this.localParticipant.isScreenShareEnabled = true })
       this.connect = FakeRoom.nextConnect || vi.fn().mockResolvedValue()
       this.disconnect = vi.fn().mockResolvedValue()
       FakeRoom.instances.push(this)
     }
     on(event, callback) { this.handlers[event] = callback }
-    emit(event) { this.handlers[event]?.() }
+    emit(event, ...args) { this.handlers[event]?.(...args) }
   }
-  return { Room: FakeRoom, RoomEvent: { Reconnecting: 'reconnecting', Reconnected: 'reconnected', Disconnected: 'disconnected', LocalTrackUnpublished: 'unpublished' } }
+  return { Room: FakeRoom, RoomEvent: { Reconnecting: 'reconnecting', Reconnected: 'reconnected', Disconnected: 'disconnected', LocalTrackUnpublished: 'unpublished' }, Track: { Source: { ScreenShare: 'screen_share' } }, createLocalScreenTracks: vi.fn() }
 })
 
 describe('creator studio', () => {
@@ -96,5 +97,76 @@ describe('creator studio', () => {
     expect(connection.localParticipant.setCameraEnabled).not.toHaveBeenCalled()
     expect(connection.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled()
     expect(api).not.toHaveBeenCalledWith('/api/sessions/session-1/activate', expect.anything())
+  })
+
+  it('can start with only a screen and obtains consent before creating a session', async () => {
+    let finishCapture
+    const track = { source: Track.Source.ScreenShare, mediaStreamTrack: { readyState: 'live' }, stop: vi.fn() }
+    createLocalScreenTracks.mockImplementation(() => new Promise(resolve => { finishCapture = resolve }))
+    await flushPromises()
+    const button = text => wrapper.findAll('button').find(item => item.text() === text)
+    await button('摄像头').trigger('click')
+    await button('麦克风').trigger('click')
+    await button('屏幕共享').trigger('click')
+    expect(wrapper.text()).toContain('准备共享屏幕')
+    await button('开始直播').trigger('click')
+    expect(createLocalScreenTracks).toHaveBeenCalledWith({ audio: false })
+    expect(api).not.toHaveBeenCalledWith('/api/rooms/room-1/sessions', expect.anything())
+    finishCapture([track])
+    await flushPromises()
+    const connection = Room.instances[0]
+    expect(connection.localParticipant.publishTrack).toHaveBeenCalledWith(track, { source: Track.Source.ScreenShare })
+    expect(connection.localParticipant.setCameraEnabled).not.toHaveBeenCalled()
+    expect(connection.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled()
+    expect(api).toHaveBeenCalledWith('/api/sessions/session-1/activate', expect.objectContaining({ method: 'POST' }))
+    connection.localParticipant.isScreenShareEnabled = false
+    connection.emit(RoomEvent.LocalTrackUnpublished, { source: Track.Source.ScreenShare })
+    await nextTick()
+    expect(wrapper.text()).toContain('屏幕共享已结束')
+    expect(track.stop).toHaveBeenCalledOnce()
+    wrapper.unmount(); wrapper = null
+    expect(track.stop).toHaveBeenCalledOnce()
+  })
+
+  it('does not create a session when screen selection is cancelled', async () => {
+    createLocalScreenTracks.mockRejectedValue(Object.assign(new Error('cancelled'), { name: 'NotAllowedError' }))
+    await flushPromises()
+    const button = text => wrapper.findAll('button').find(item => item.text() === text)
+    await button('摄像头').trigger('click')
+    await button('麦克风').trigger('click')
+    await button('屏幕共享').trigger('click')
+    await button('开始直播').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('已取消屏幕共享')
+    expect(api).not.toHaveBeenCalledWith('/api/rooms/room-1/sessions', expect.anything())
+  })
+
+  it('releases a screen selected after the creator has left the studio', async () => {
+    let finishCapture
+    const track = { source: Track.Source.ScreenShare, mediaStreamTrack: { readyState: 'live' }, stop: vi.fn() }
+    createLocalScreenTracks.mockImplementation(() => new Promise(resolve => { finishCapture = resolve }))
+    await flushPromises()
+    const button = text => wrapper.findAll('button').find(item => item.text() === text)
+    await button('屏幕共享').trigger('click')
+    await button('开始直播').trigger('click')
+    wrapper.unmount(); wrapper = null
+    finishCapture([track])
+    await flushPromises()
+    expect(track.stop).toHaveBeenCalledOnce()
+    expect(api).not.toHaveBeenCalledWith('/api/rooms/room-1/sessions', expect.anything())
+  })
+
+  it('does not activate a stream whose screen capture has already ended', async () => {
+    const track = { source: Track.Source.ScreenShare, mediaStreamTrack: { readyState: 'ended' }, stop: vi.fn() }
+    createLocalScreenTracks.mockResolvedValue([track])
+    await flushPromises()
+    const button = text => wrapper.findAll('button').find(item => item.text() === text)
+    await button('屏幕共享').trigger('click')
+    await button('开始直播').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('屏幕共享已结束')
+    expect(Room.instances[0].localParticipant.publishTrack).not.toHaveBeenCalled()
+    expect(api).not.toHaveBeenCalledWith('/api/sessions/session-1/activate', expect.anything())
+    expect(track.stop).toHaveBeenCalledOnce()
   })
 })

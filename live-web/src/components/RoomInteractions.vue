@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Send, Heart, Smile, Gift, ThumbsUp, Mic, Wifi, WifiOff, ChevronDown, Check, X } from 'lucide-vue-next'
 import { api } from '../api'
 import { createLiveSocket } from '../liveSocket'
@@ -9,12 +9,29 @@ const props = defineProps({ roomId: String, sessionId: String, isHost: Boolean, 
 const emit = defineEmits(['danmaku', 'reaction', 'accept-mic', 'end-mic', 'viewer-count', 'session-state'])
 const user = useUser(), tab = ref('chat'), messageText = ref(''), questionText = ref(''), pollQuestion = ref(''), pollOptions = ref(['', ''])
 const messages = ref([]), pending = ref([]), data = ref({ poll: null, questions: [], micRequests: [] }), state = ref('connecting'), connectionCount = ref(null), notice = ref(''), showLab = ref(false), showGifts = ref(false), approved = ref(null), confirming = ref(false), cohosting = ref(false), lastRtt = ref(null), recovered = ref(0)
-let socket, lastSeq = 0, pingAt = 0, noticeTimer, recoveryEpoch = 0, syncing = false, backlog = [], deletedDuringRecovery = new Set()
+const chatPanel = ref(null), unread = ref(0), followingChat = ref(true)
+let socket, lastSeq = 0, pingAt = 0, noticeTimer, recoveryEpoch = 0, refreshSequence = 0, syncing = false, backlog = [], deletedDuringRecovery = new Set()
 const myMic = computed(() => data.value.micRequests?.find(item => item.user_id === user.current?.id))
 const hostRequests = computed(() => data.value.micRequests || [])
 function flash(text) { notice.value = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => { notice.value = '' }, 5000) }
-function merge(message, fly = false) {
-  if ((message?.user_id || message?.userId) === user.current?.id) {
+function scrollChat() {
+  const element = chatPanel.value
+  if (!element) return
+  followingChat.value = element.scrollHeight - element.scrollTop - element.clientHeight <= 48
+  if (followingChat.value) unread.value = 0
+}
+function showLatest() {
+  followingChat.value = true; unread.value = 0
+  nextTick(() => { if (chatPanel.value && tab.value === 'chat' && followingChat.value) chatPanel.value.scrollTop = chatPanel.value.scrollHeight })
+}
+function updateChatPosition(notify) {
+  if (tab.value === 'chat' && followingChat.value) {
+    nextTick(() => { if (chatPanel.value && tab.value === 'chat' && followingChat.value) chatPanel.value.scrollTop = chatPanel.value.scrollHeight })
+  } else if (notify) unread.value++
+}
+function merge(message, fly = false, notify = fly) {
+  const mine = !!user.current?.id && (message?.user_id || message?.userId) === user.current.id
+  if (mine) {
     const confirmed = pending.value.find(item => item.clientMessageId === (message.client_id || message.clientMessageId))
     if (confirmed) { clearTimeout(confirmed.timer); pending.value = pending.value.filter(item => item !== confirmed) }
   }
@@ -23,6 +40,7 @@ function merge(message, fly = false) {
   messages.value.push(message); messages.value.sort((a, b) => a.seq - b.seq)
   if (messages.value.length > 250) messages.value.splice(0, messages.value.length - 250)
   lastSeq = Math.max(lastSeq, Number(message.seq || 0))
+  updateChatPosition(notify && !mine && !message.deleted)
   if (fly && !message.deleted) emit('danmaku', message)
 }
 async function recover() {
@@ -31,15 +49,16 @@ async function recover() {
   syncing = true
   try {
     let count = 0, fetched = 0, cursor = lastSeq, batch
+    const initialHistory = lastSeq === 0
     do {
       batch = await api(`/api/sessions/${session}/messages?after=${cursor}`)
       if (epoch !== recoveryEpoch) return
       fetched += batch.length
-      for (const item of batch) { if (!messages.value.some(m => m.id === item.id)) count++; merge(item); cursor = Math.max(cursor, Number(item.seq)) }
+      for (const item of batch) { if (!messages.value.some(m => m.id === item.id)) count++; merge(item, false, !initialHistory); cursor = Math.max(cursor, Number(item.seq)) }
       if (batch.length === 200 && fetched >= 1000) {
         const latest = await api(`/api/sessions/${session}/messages?latest=true`)
         if (epoch !== recoveryEpoch) return
-        for (const item of latest) { if (!messages.value.some(m => m.id === item.id)) count++; merge(item) }
+        for (const item of latest) { if (!messages.value.some(m => m.id === item.id)) count++; merge(item, false, !initialHistory) }
         flash('部分较早的消息未加载')
         break
       }
@@ -47,13 +66,16 @@ async function recover() {
     recovered.value += count
   } catch (error) { flash(error.message) }
   finally {
-    if (epoch === recoveryEpoch) { syncing = false; const buffered = backlog; backlog = []; buffered.forEach(item => merge(item)); deletedDuringRecovery.clear() }
+    if (epoch === recoveryEpoch) { syncing = false; const buffered = backlog; backlog = []; buffered.forEach(item => merge(item, false, true)); deletedDuringRecovery.clear() }
   }
 }
 async function refresh() {
   if (!props.sessionId) return
+  const epoch = recoveryEpoch, request = ++refreshSequence, session = props.sessionId
   try {
-    data.value = await api(`/api/sessions/${props.sessionId}/interactions`)
+    const snapshot = await api(`/api/sessions/${session}/interactions`)
+    if (epoch !== recoveryEpoch || request !== refreshSequence) return
+    data.value = snapshot
     const invitation = !cohosting.value && data.value.micRequests?.find(item => item.identity === props.mediaIdentity && item.status === 'APPROVED')
     if (invitation && !approved.value) approved.value = { requestId: invitation.id, identity: invitation.identity }
   } catch { /* A session may have just ended. */ }
@@ -81,18 +103,19 @@ function receive(event) {
 }
 function connect() {
   recoveryEpoch++; const epoch = recoveryEpoch
-  syncing = false; backlog = []; deletedDuringRecovery.clear(); socket?.close(); messages.value = []; pending.value.forEach(item => clearTimeout(item.timer)); pending.value = []; lastSeq = 0; connectionCount.value = null; approved.value = null; confirming.value = false; cohosting.value = false
+  refreshSequence++; syncing = false; backlog = []; deletedDuringRecovery.clear(); socket?.close(); messages.value = []; pending.value.forEach(item => clearTimeout(item.timer)); pending.value = []; data.value = { poll: null, questions: [], micRequests: [] }; lastSeq = 0; connectionCount.value = null; approved.value = null; confirming.value = false; cohosting.value = false; unread.value = 0; followingChat.value = true; recovered.value = 0
   if (!props.roomId) return
   socket = createLiveSocket({ roomId: props.roomId, sessionId: props.sessionId, onMessage(event) { if (epoch === recoveryEpoch) receive(event) }, onStateChange(next) { if (epoch !== recoveryEpoch) return; state.value = next; if (next !== 'connected') confirming.value = false } })
 }
 watch(() => [props.roomId, props.sessionId, user.current?.id], connect, { immediate: true })
+watch(tab, next => { if (next === 'chat') showLatest() })
 onBeforeUnmount(() => { recoveryEpoch++; syncing = false; socket?.close(); clearTimeout(noticeTimer); pending.value.forEach(item => clearTimeout(item.timer)) })
 function send(payload) { if (!user.require()) return false; if (!socket?.send(payload)) { flash('互动连接正在恢复，请稍后重试'); return false }; return true }
 function sendChat() {
   const content = messageText.value.trim(); if (!content || !user.require()) return
   const item = { clientMessageId: crypto.randomUUID(), content, failed: false }
   if (!send({ type: 'DANMAKU', clientMessageId: item.clientMessageId, content })) return
-  messageText.value = ''; pending.value.push(item)
+  messageText.value = ''; pending.value.push(item); showLatest()
   item.timer = setTimeout(() => { item.failed = true }, 5000)
 }
 function retry(item) { if (send({ type: 'DANMAKU', clientMessageId: item.clientMessageId, content: item.content })) { item.failed = false; item.timer = setTimeout(() => { item.failed = true }, 5000) } }
@@ -102,21 +125,27 @@ function ask() { if (questionText.value.trim() && send({ type: 'QUESTION_ASK', c
 function acceptMic() { if (approved.value && !confirming.value && send({ type: 'MIC_CONFIRM', requestId: approved.value.requestId })) confirming.value = true }
 function declineMic() { if (approved.value) send({ type: 'MIC_END', requestId: approved.value.requestId }); approved.value = null }
 function ping() { pingAt = performance.now(); if (!socket?.send({ type: 'PING' })) { pingAt = 0; flash('互动连接还未建立') } }
+function moveTab(event, step) {
+  const group = event.currentTarget.parentElement, tabs = ['chat', 'questions', 'poll']
+  tab.value = tabs[(tabs.indexOf(tab.value) + step + tabs.length) % tabs.length]
+  nextTick(() => group.querySelector(`[data-tab="${tab.value}"]`)?.focus())
+}
 defineExpose({ endMic: (requestId) => send({ type: 'MIC_END', requestId }) })
 </script>
 <template>
   <section class="interaction-panel">
     <div class="panel-heading"><div><strong>直播互动</strong><span>LIVE CHAT & MORE</span></div><span class="connection-pill" :class="{ connected: state === 'connected' }"><i></i>{{ state === 'connected' ? '已连接' : '连接中' }}</span></div>
-    <div class="panel-tabs" role="tablist"><button :class="{ active: tab === 'chat' }" @click="tab = 'chat'">聊天</button><button :class="{ active: tab === 'questions' }" @click="tab = 'questions'">提问 <span v-if="data.questions?.length">{{ data.questions.length }}</span></button><button :class="{ active: tab === 'poll' }" @click="tab = 'poll'">投票</button></div>
+    <div class="panel-tabs" role="tablist" aria-label="互动内容"><button role="tab" data-tab="chat" :aria-selected="tab === 'chat'" :tabindex="tab === 'chat' ? 0 : -1" :class="{ active: tab === 'chat' }" @click="tab = 'chat'" @keydown.left.prevent="moveTab($event, -1)" @keydown.right.prevent="moveTab($event, 1)">聊天 <span v-if="unread">{{ unread > 99 ? '99+' : unread }}</span></button><button role="tab" data-tab="questions" :aria-selected="tab === 'questions'" :tabindex="tab === 'questions' ? 0 : -1" :class="{ active: tab === 'questions' }" @click="tab = 'questions'" @keydown.left.prevent="moveTab($event, -1)" @keydown.right.prevent="moveTab($event, 1)">提问 <span v-if="data.questions?.length">{{ data.questions.length }}</span></button><button role="tab" data-tab="poll" :aria-selected="tab === 'poll'" :tabindex="tab === 'poll' ? 0 : -1" :class="{ active: tab === 'poll' }" @click="tab = 'poll'" @keydown.left.prevent="moveTab($event, -1)" @keydown.right.prevent="moveTab($event, 1)">投票</button></div>
     <div v-if="approved" class="mic-banner"><div><strong>主播邀请你连麦</strong><span>确认后才会请求设备权限</span></div><div><button class="icon-button" aria-label="拒绝连麦" :disabled="confirming" @click="declineMic"><X :size="16" /></button><button class="button button-dark button-small" :disabled="confirming" @click="acceptMic">{{ confirming ? '正在连接…' : '确认连麦' }}</button></div></div>
-    <div v-if="tab === 'chat'" class="panel-content chat-content">
+    <div v-if="tab === 'chat'" ref="chatPanel" class="panel-content chat-content" role="tabpanel" aria-label="聊天" @scroll="scrollChat">
       <div class="chat-welcome"><span>✳</span><div><strong>欢迎进入直播间</strong><p>请保持友善，尊重其他观众。</p></div></div>
       <div v-if="!messages.length && !pending.length" class="chat-placeholder">暂无消息</div>
       <div v-for="message in messages" :key="message.id" class="chat-line"><span class="chat-name">{{ message.nickname }}：</span><span>{{ message.deleted ? '该消息已被移除' : message.content }}</span><span v-if="isHost && !message.deleted && message.user_id !== user.current?.id && message.userId !== user.current?.id" class="chat-moderation"><button title="移除消息" @click="send({ type: 'DELETE_MESSAGE', messageId: message.id })">移除</button><button title="禁言 10 分钟" @click="send({ type: 'MUTE', userId: message.user_id || message.userId })">禁言</button></span></div>
       <div v-for="item in pending" :key="item.clientMessageId" class="chat-line pending-line"><span class="chat-name">我：</span>{{ item.content }} <button v-if="item.failed" class="text-link" @click="retry(item)">重试</button><span v-else> · 发送中</span></div>
     </div>
-    <div v-else-if="tab === 'questions'" class="panel-content questions-content"><div class="panel-intro"><strong>提问箱</strong><p>向主播提问，或支持感兴趣的问题。</p></div><div v-if="!data.questions?.length" class="panel-empty">暂无提问</div><div v-for="question in data.questions" :key="question.id" class="question-card"><div class="question-meta">{{ question.nickname }} <span v-if="question.status === 'ANSWERED'">已回答</span></div><p>{{ question.content }}</p><div><button class="mini-action" @click="send({ type: 'QUESTION_VOTE', questionId: question.id })"><ThumbsUp :size="14" /> 我也想问 · {{ question.votes }}</button><button v-if="isHost && question.status !== 'ANSWERED'" class="mini-action" @click="send({ type: 'QUESTION_ANSWER', questionId: question.id })">标记已回答</button></div></div><form class="inline-form" @submit.prevent="ask"><input v-model="questionText" maxlength="300" placeholder="输入你的问题" /><button class="button button-dark button-small">提问</button></form></div>
-    <div v-else class="panel-content poll-content"><div class="panel-intro"><strong>实时投票</strong><p>参与主播发起的投票。</p></div><div v-if="data.poll" class="poll-card"><span class="poll-status">{{ data.poll.status === 'OPEN' ? '● 进行中' : '已结束' }}</span><h4>{{ data.poll.question }}</h4><button v-for="option in data.poll.options" :key="option.id" class="poll-option" :disabled="data.poll.status !== 'OPEN' || !!data.poll.myVote" @click="send({ type: 'POLL_VOTE', pollId: data.poll.id, optionId: option.id })"><span>{{ option.label }} <Check v-if="data.poll.myVote === option.id" :size="14" /></span><strong>{{ option.votes }} 票</strong></button><button v-if="isHost && data.poll.status === 'OPEN'" class="text-link" @click="send({ type: 'POLL_CLOSE', pollId: data.poll.id })">结束投票</button></div><div v-else class="panel-empty">暂无进行中的投票。</div><form v-if="isHost" class="poll-form" @submit.prevent="createPoll"><label>发起新投票<input v-model.trim="pollQuestion" maxlength="150" required placeholder="写下你的问题" /></label><input v-for="(_, index) in pollOptions" :key="index" v-model.trim="pollOptions[index]" maxlength="100" required :placeholder="`选项 ${index + 1}`" /><button v-if="pollOptions.length < 4" type="button" class="text-link" @click="pollOptions.push('')">+ 添加选项</button><button class="button button-dark button-small">发起投票</button></form></div>
+    <div v-else-if="tab === 'questions'" class="panel-content questions-content" role="tabpanel" aria-label="提问"><div class="panel-intro"><strong>提问箱</strong><p>向主播提问，或支持感兴趣的问题。</p></div><div v-if="!data.questions?.length" class="panel-empty">暂无提问</div><div v-for="question in data.questions" :key="question.id" class="question-card"><div class="question-meta">{{ question.nickname }} <span v-if="question.status === 'ANSWERED'">已回答</span></div><p>{{ question.content }}</p><div><button class="mini-action" @click="send({ type: 'QUESTION_VOTE', questionId: question.id })"><ThumbsUp :size="14" /> 我也想问 · {{ question.votes }}</button><button v-if="isHost && question.status !== 'ANSWERED'" class="mini-action" @click="send({ type: 'QUESTION_ANSWER', questionId: question.id })">标记已回答</button></div></div><form class="inline-form" @submit.prevent="ask"><input v-model="questionText" maxlength="300" placeholder="输入你的问题" /><button class="button button-dark button-small">提问</button></form></div>
+    <div v-else class="panel-content poll-content" role="tabpanel" aria-label="投票"><div class="panel-intro"><strong>实时投票</strong><p>参与主播发起的投票。</p></div><div v-if="data.poll" class="poll-card"><span class="poll-status">{{ data.poll.status === 'OPEN' ? '● 进行中' : '已结束' }}</span><h4>{{ data.poll.question }}</h4><button v-for="option in data.poll.options" :key="option.id" class="poll-option" :disabled="data.poll.status !== 'OPEN' || !!data.poll.myVote" @click="send({ type: 'POLL_VOTE', pollId: data.poll.id, optionId: option.id })"><span>{{ option.label }} <Check v-if="data.poll.myVote === option.id" :size="14" /></span><strong>{{ option.votes }} 票</strong></button><button v-if="isHost && data.poll.status === 'OPEN'" class="text-link" @click="send({ type: 'POLL_CLOSE', pollId: data.poll.id })">结束投票</button></div><div v-else class="panel-empty">暂无进行中的投票。</div><form v-if="isHost" class="poll-form" @submit.prevent="createPoll"><label>发起新投票<input v-model.trim="pollQuestion" maxlength="150" required placeholder="写下你的问题" /></label><input v-for="(_, index) in pollOptions" :key="index" v-model.trim="pollOptions[index]" maxlength="100" required :placeholder="`选项 ${index + 1}`" /><button v-if="pollOptions.length < 4" type="button" class="text-link" @click="pollOptions.push('')">+ 添加选项</button><button class="button button-dark button-small">发起投票</button></form></div>
+    <div v-if="tab === 'chat' && unread" class="chat-update" role="status"><button @click="showLatest">{{ unread > 99 ? '99+' : unread }} 条新消息 ↓</button></div>
     <div v-if="notice" class="panel-notice" role="status">{{ notice }}</div>
     <div v-if="sessionId" class="interaction-footer">
       <div class="quick-actions"><button @click="react('REACTION', 'heart')"><Heart :size="17" /> 点赞</button><button @click="react('REACTION', 'clap')"><Smile :size="17" /> 鼓掌</button><button @click="showGifts = !showGifts"><Gift :size="17" /> 礼物</button><button v-if="!isHost" :disabled="!mediaIdentity" @click="myMic ? send({ type: 'MIC_END', requestId: myMic.id }) : send({ type: 'MIC_APPLY', identity: mediaIdentity })"><Mic :size="17" /> {{ myMic ? '取消连麦' : '申请连麦' }}</button></div>
