@@ -80,9 +80,10 @@ function receive(event) {
   if (event.type === 'SYSTEM' && event.sessionId) flash(event.message)
 }
 function connect() {
-  recoveryEpoch++; syncing = false; backlog = []; deletedDuringRecovery.clear(); socket?.close(); messages.value = []; pending.value = []; lastSeq = 0; connectionCount.value = null; approved.value = null; confirming.value = false; cohosting.value = false
+  recoveryEpoch++; const epoch = recoveryEpoch
+  syncing = false; backlog = []; deletedDuringRecovery.clear(); socket?.close(); messages.value = []; pending.value.forEach(item => clearTimeout(item.timer)); pending.value = []; lastSeq = 0; connectionCount.value = null; approved.value = null; confirming.value = false; cohosting.value = false
   if (!props.roomId) return
-  socket = createLiveSocket({ roomId: props.roomId, sessionId: props.sessionId, onMessage: receive, onStateChange(next) { state.value = next; if (next !== 'connected') confirming.value = false } })
+  socket = createLiveSocket({ roomId: props.roomId, sessionId: props.sessionId, onMessage(event) { if (epoch === recoveryEpoch) receive(event) }, onStateChange(next) { if (epoch !== recoveryEpoch) return; state.value = next; if (next !== 'connected') confirming.value = false } })
 }
 watch(() => [props.roomId, props.sessionId, user.current?.id], connect, { immediate: true })
 onBeforeUnmount(() => { recoveryEpoch++; syncing = false; socket?.close(); clearTimeout(noticeTimer); pending.value.forEach(item => clearTimeout(item.timer)) })

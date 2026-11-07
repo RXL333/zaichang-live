@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RoomEvent, Track } from 'livekit-client'
 import { Radio, Volume2, VolumeX, Maximize, MessageSquare, MessageSquareOff, LayoutGrid } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
@@ -39,6 +39,7 @@ async function sound() { muted.value = !muted.value; if (!muted.value) await pro
 async function startAudio() { await props.room?.startAudio(); audioReady.value = props.room?.canPlaybackAudio !== false }
 function fullscreen() { if (document.fullscreenElement) document.exitFullscreen(); else stage.value?.requestFullscreen?.() }
 function toggleLayout() { layout.value = focusLayout.value ? 'grid' : 'focus' }
+onMounted(update)
 onBeforeUnmount(() => unlisten(props.room))
 </script>
 <template>

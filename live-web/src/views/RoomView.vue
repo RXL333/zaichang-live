@@ -32,14 +32,14 @@ async function connectMedia() {
     const credential = await api(`/api/sessions/${room.value.sessionId}/media-token`, { method: 'POST', body: { role: 'viewer' } })
     if (current !== generation) return
     const connection = new Room({ adaptiveStream: true, dynacast: true })
-    connection.on(RoomEvent.Reconnecting, () => { mediaState.value = 'reconnecting' })
-    connection.on(RoomEvent.Reconnected, () => { mediaState.value = 'connected' })
-    connection.on(RoomEvent.Disconnected, () => { if (current === generation) mediaState.value = 'disconnected' })
+    connection.on(RoomEvent.Reconnecting, () => { if (current === generation) mediaState.value = 'reconnecting' })
+    connection.on(RoomEvent.Reconnected, () => { if (current === generation) { mediaState.value = 'connected'; mediaError.value = '' } })
+    connection.on(RoomEvent.Disconnected, () => { if (current === generation && mediaRoom.value === connection) { mediaState.value = 'disconnected'; mediaError.value = '直播连接已断开，请重试' } })
     mediaRoom.value = connection
     await connection.connect(credential.url, credential.token)
     if (current !== generation) { await connection.disconnect(); return }
     mediaIdentity.value = credential.identity; mediaState.value = 'connected'
-  } catch (e) { if (current === generation) { mediaError.value = '暂时无法播放直播，请检查网络后重试'; mediaState.value = 'error' } }
+  } catch (e) { if (current === generation) { const failed = mediaRoom.value; mediaRoom.value = null; await failed?.disconnect(); if (current === generation) { mediaError.value = '暂时无法播放直播，请检查网络后重试'; mediaState.value = 'error' } } }
 }
 async function follow() {
   if (!user.require()) return
@@ -47,6 +47,10 @@ async function follow() {
   catch (e) { flash(e.message) }
 }
 async function share() {
+  if (navigator.share) {
+    try { await navigator.share({ title: room.value?.title || '在场 LIVE', url: location.href }); return }
+    catch (e) { if (e.name === 'AbortError') return }
+  }
   try { await navigator.clipboard.writeText(location.href); flash('直播间链接已复制') }
   catch { flash('复制失败，可以直接复制地址栏中的链接') }
 }
