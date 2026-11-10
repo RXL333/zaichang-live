@@ -2,7 +2,9 @@
 
 一个面向课程设计的互动直播项目：Vue 3 前端、Spring Boot 后端、WebSocket 实时互动和 LiveKit 音视频。直播大厅、观看页和主播工作台均使用真实房间、场次和互动数据；空房间不会填充虚构观众或假消息。
 
-[GitHub Pages 入口](https://rxl333.github.io/zaichang-live/)会进入部署在 Render 的完整网站。网站数据库使用 Neon PostgreSQL，音视频使用 LiveKit Cloud。
+[打开在场 LIVE](https://rxl333.github.io/zaichang-live/)：前端由 GitHub Pages 提供，后端运行在 InstaBox 云电脑上，数据保存在 Neon PostgreSQL，音视频由 LiveKit Cloud 提供。日常访问不依赖个人电脑开机。
+
+云电脑自动暂停后，访问网站会尝试唤醒服务，首次连接可能需要等待。也可在 GitHub 仓库的 Actions 中运行“启动直播服务”；云端重建命令及限制见 [部署说明](docs/deployment.md)。
 
 [光标构建展示](https://rxl333.github.io/zaichang-live/showcase/)是独立的纯前端概念演示，展示直播大厅、观看页和主播工作台。页面里的画面、聊天与设备操作均为示例，不连接直播服务。光标动画根据交互思路独立实现，不包含 Swarm Rebuild 的源码。
 

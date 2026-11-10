@@ -1,10 +1,11 @@
-name: Publish GitHub Pages entry
+name: Publish GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
-      - 'pages/**'
+      - 'live-web/**'
+      - 'pages/showcase/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -25,9 +26,25 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: live-web/package-lock.json
+      - name: Build website
+        working-directory: live-web
+        env:
+          VITE_PUBLIC_BASE: /zaichang-live/
+          VITE_HASH_ROUTER: 'true'
+          VITE_API_ORIGIN: https://18080-agq4iihhd6ie55qjpl2ezecsrm.instabox.tech
+        run: |
+          npm ci
+          npm run build
+      - name: Keep the existing showcase
+        run: cp -R pages/showcase live-web/dist/showcase
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: pages
+          path: live-web/dist
       - id: deployment
         uses: actions/deploy-pages@v4

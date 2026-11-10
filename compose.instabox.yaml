@@ -1,0 +1,17 @@
+name: zaichang-live
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "18080:18080"
+    env_file:
+      - path: ${ZAICHANG_ENV_FILE:-/data/zaichang-live/secrets.env}
+        format: raw
+    environment:
+      APP_ENV: production
+      APP_PUBLIC_ORIGIN: https://rxl333.github.io
+      COOKIE_SECURE: "true"
+      PORT: "18080"

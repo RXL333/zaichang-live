@@ -1,3 +1,5 @@
+import { apiOrigin, getSessionToken } from './api'
+
 export function createLiveSocket({ roomId, sessionId, onMessage, onStateChange }) {
   let socket, timer, heartbeat, attempt = 0, stopped = false, pausedUntil = 0
   const setState = (state) => onStateChange?.(state)
@@ -8,10 +10,12 @@ export function createLiveSocket({ roomId, sessionId, onMessage, onStateChange }
   function connect() {
     if (stopped) return
     setState(attempt ? 'reconnecting' : 'connecting')
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    socket = new WebSocket(`${protocol}//${location.host}/ws/live`)
+    const url = new URL('/ws/live', apiOrigin || `${location.protocol}//${location.host}`)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    socket = new WebSocket(url.href)
     socket.onopen = () => {
-      attempt = 0; setState('connected'); send({ type: 'JOIN', roomId, sessionId: sessionId || '' })
+      const authToken = getSessionToken()
+      attempt = 0; setState('connected'); send({ type: 'JOIN', roomId, sessionId: sessionId || '', ...(authToken ? { authToken } : {}) })
       heartbeat = setInterval(() => send({ type: 'PING' }), 25000)
     }
     socket.onmessage = (event) => { try { onMessage?.(JSON.parse(event.data)) } catch { /* Ignore malformed messages. */ } }

@@ -1,55 +1,40 @@
 # 部署说明
 
-仓库提供 GitHub Pages 入口和 Render 单个 Docker Web Service 配置：Pages 提供入口页，入口指向 Render 上的完整网站；Render 构建阶段编译 Vue 前端并打包进 Spring Boot，运行阶段由 Java 在同一站点提供网页和 API。数据库使用 PostgreSQL，音视频使用单独的 LiveKit 服务。这样登录、互动和媒体连接不依赖跨站点 Cookie，适合手机浏览器。
+在场 LIVE 的完整 Vue 前端发布在 [GitHub Pages](https://rxl333.github.io/zaichang-live/)，Spring Boot 和 WebSocket 运行在 InstaBox，数据使用 Neon PostgreSQL，音视频使用 LiveKit Cloud。GitHub Pages 不保存数据库或服务密钥。
 
-当前部署使用 Neon 免费 PostgreSQL、Render 免费 Web Service 和 LiveKit Cloud。之前创建的 Supabase 项目保留，但当前网站没有连接它：从 Render 连接其连接池时 TLS 握手失败。
+## 日常使用
 
-## GitHub Pages 入口
+直接打开网站即可。InstaBox 因空闲自动暂停时，网站请求公开 HTTPS 地址可触发恢复；页面首次连接可能需要等待。平台冷却期间、机器被手动暂停或停止时，普通访问不能保证立即恢复，需按平台控制台提示操作。[InstaBox 自动暂停规则](https://instabox.sh/docs/machines/auto-pause)
 
-1. 仓库 Settings → Pages → Build and deployment → Source 选择 **GitHub Actions**。工作流 `.github/workflows/pages.yml` 会发布 `pages/` 目录。
-2. `pages/config.js` 指向 Render 的 HTTPS 地址。修改并推送此文件后，Pages 工作流会更新入口并跳转到相应网站。
-3. 登录和注册在 Render 网站完成；GitHub Pages 入口本身不接收账号密码。
+也可在 GitHub 仓库的 **Actions → 启动直播服务 → Run workflow** 中点击运行。此操作向服务发送健康检查请求，适用于自动暂停后的唤醒；它不持有云电脑的管理密钥，不能解除手动停止或平台冷却。
 
-GitHub Pages 为免费个人账号提供公开仓库站点；具体使用限制见 [GitHub Pages 官方说明](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。本项目为课程演示，尚未完成正式运营所需的验收。
+## 云电脑启动与更新
 
-## 准备服务
+应用目录是 `/data/zaichang-live/app`，数据库及 LiveKit 配置单独保存在 `/data/zaichang-live/secrets.env`，文件权限为 `600`，不放入仓库或 Docker 构建目录。
 
-1. 将项目放入用户自己的 Git 仓库，创建 PostgreSQL 数据库和 LiveKit Cloud 项目。
-2. 在 Render 连接仓库，使用根目录的 `render.yaml` 或以 `Dockerfile` 创建 Web Service。根据实际账号确认免费额度、休眠行为和计费条件。
-3. 在 Render 环境变量中配置下列值；真实密钥只填在服务提供商的密钥设置中，不要提交到仓库。
+在云电脑终端执行：
 
-| 变量 | 内容 |
-| --- | --- |
-| `APP_ENV` | `production`，`render.yaml` 已设置 |
-| `COOKIE_SECURE` | `true`，`render.yaml` 已设置 |
-| `DATABASE_URL` | `jdbc:postgresql://主机:端口/数据库?sslmode=require` |
-| `DATABASE_USER` | PostgreSQL 用户名，连接池用户名以数据库提供商的设置为准 |
-| `DATABASE_PASSWORD` | PostgreSQL 密码 |
-| `LIVEKIT_URL` | LiveKit 项目提供的 `wss://` 地址 |
-| `LIVEKIT_API_KEY` | LiveKit API key |
-| `LIVEKIT_API_SECRET` | 对应的 LiveKit API secret |
-| `APP_PUBLIC_ORIGIN` | 可选。默认使用 Render 提供的 `RENDER_EXTERNAL_URL`；使用自定义域名时设为实际的 `https://域名`，不要带路径或末尾斜杠 |
+```bash
+cd /data/zaichang-live/app
+./scripts/instabox-start.sh
+```
 
-4. 当前 Neon 连接使用连接池、TLS 和 `prepareThreshold=0`。如果使用 Supabase，建议为本项目单独创建免费项目并关闭 Data API，避免将本项目的表直接暴露到自动生成的接口；本应用通过后端 JDBC 访问数据库，不需要 Data API。按项目提供的连接信息检查 IPv4、连接池和 TLS 要求。
-5. 在 LiveKit 项目的 Webhook 配置中添加 `https://你的域名/api/livekit/webhook`。后端会验证签名；即使 Webhook 延迟，也会定期核对媒体连接状态。
-6. 完成部署后访问 `/api/system/status`，再用实际的主播和观众设备检查注册、开播、播放、互动、连麦及结束直播。测试手机和校园网时使用真实的公网 HTTPS 地址。
+脚本使用 `compose.instabox.yaml` 构建并启动后端，等待 `/api/system/status` 成功。Docker 容器配置了 `restart: unless-stopped`；云电脑重启后，Docker 服务启用时会尝试恢复容器。自动暂停和恢复保留运行中的进程。构建或配置变更需要重新运行脚本；普通访问无需运行。
 
-生产配置会拒绝 H2、默认开发密钥、非 HTTPS 页面来源、非 WSS 媒体地址及未启用 Secure 的会话 Cookie。会话保存在应用进程内，实例重启后用户需重新登录；当前配置以单实例为目标，不适合直接扩展为多个应用实例。
+环境文件包含 `DATABASE_URL`、`DATABASE_USER`、`DATABASE_PASSWORD`、`LIVEKIT_URL`、`LIVEKIT_API_KEY`、`LIVEKIT_API_SECRET`。如需从原 Render 服务重新导入，可在云电脑交互式终端运行 `python3 scripts/import-render-env.py`，按提示输入临时 Render API Key；导入后撤销该临时密钥。脚本不会覆盖已存在的配置文件。
 
-## 发布前检查
+## 前端发布
 
-- 核对数据库备份和服务商额度；不要将开发口令或 `.env` 文件提交仓库。
-- 检查 HTTPS、摄像头和麦克风授权、不同网络下的 LiveKit 连接。
-- 完成 [验证记录](verification.md) 中尚未执行的真实设备和持续运行测试。
-- 增加正式运营需要的审计、内容审核、请求限流、监控告警、数据保留与恢复策略。
+仓库 Settings → Pages 的来源为 **GitHub Actions**。推送 `main` 的前端代码后，`.github/workflows/pages.yml` 构建 Vue 并发布 `live-web/dist`，同时保留原有 `showcase` 页面。构建配置中的 `VITE_API_ORIGIN` 是 InstaBox 提供的公开 HTTPS 地址；更换端口地址时同步修改该值。
 
-Render 已成功构建并启动生产镜像。本地 Docker Compose 容器启动仍未验证。
+GitHub Pages 使用子路径和哈希路由，因此刷新和分享房间链接不依赖服务器端路由。跨站会话通过请求头传递，保存在当前浏览器标签页，避免依赖第三方 Cookie；后端只允许配置的 GitHub Pages 来源。后端重启后需要重新登录。
 
-当前 Render 服务通过公开仓库地址部署，代码推送后不会自动更新后端。需要更新网站时，在 Render 服务页面选择 **Manual Deploy → Deploy latest commit**；GitHub Pages 入口仍由 Actions 自动更新。
+## LiveKit 与备用服务
 
-## 免费额度与限制
+LiveKit Cloud 的 Webhook 应指向 `https://18080-agq4iihhd6ie55qjpl2ezecsrm.instabox.tech/api/livekit/webhook`，使用与后端一致的签名密钥。即使通知延迟，后端也会定期核对媒体连接状态。
 
-- [Render 免费服务](https://render.com/docs/free)：工作区内所有免费 Web 服务共享每月 750 小时；空闲 15 分钟后休眠，首次访问可能需要约一分钟唤醒。带宽或构建额度超限后，如果账户已添加付款方式可能产生费用；请在 Render 控制台核对当前额度和账单设置。免费 Render Postgres 30 天后到期，因此当前使用 Neon 保存数据。
-- [Neon 免费计划](https://neon.com/docs/introduction/plans)：每项目每月包含 100 CU 小时、1 GB PostgreSQL 存储和 5 GB 公网传输；闲置 5 分钟后计算实例会暂停。计算或传输额度耗尽后服务会暂停至下个计费周期或升级，请在控制台关注用量。
-- [Supabase 免费项目](https://supabase.com/docs/guides/platform/free-project-pausing)：数据库活动长期不足时可能暂停，需要在控制台恢复；定期备份重要数据。
-- [LiveKit Cloud Build 免费额度](https://docs.livekit.io/deploy/admin/quotas-and-limits/)：当前包括每月 5,000 参与者分钟及 50 GB 下行流量。每个连接各自计时，例如一位主播和五位观众同时在线 30 分钟约使用 180 参与者分钟；达到免费额度后新请求会受限。实际额度以服务商控制台为准。
+原 Render 服务可作为备用；它保留原有部署，运行自己的前后端。切换入口前应先验证新服务，出现问题时可使用原 Render 地址访问。备份服务与新后端连接同一数据库，避免同时进行可能冲突的管理操作。
+
+## 验收与限制
+
+查看 [验证记录](verification.md)，并使用真实设备检查登录、开播、屏幕共享、观众观看、互动和连麦。InstaBox 免费套餐的最长连续运行时间、冷却、流量以及 GitHub Actions 和 LiveKit 的免费额度均以各自控制台与当前政策为准；短时课程演示前应提前检查服务状态。

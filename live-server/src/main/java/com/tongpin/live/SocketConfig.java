@@ -20,7 +20,7 @@ public class SocketConfig implements WebSocketConfigurer {
     @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry){
         var registration=registry.addHandler(socket,"/ws/live").addInterceptors(new HandshakeInterceptor(){
             public boolean beforeHandshake(ServerHttpRequest request,ServerHttpResponse response,WebSocketHandler handler,Map<String,Object> attrs){
-                if(request instanceof ServletServerHttpRequest servlet){HttpSession session=servlet.getServletRequest().getSession(true);attrs.put("httpSession",session);} return true;
+                if(request instanceof ServletServerHttpRequest servlet){HttpSession session=servlet.getServletRequest().getSession(false);if(session!=null)attrs.put("httpSession",session);} return true;
             }
             public void afterHandshake(ServerHttpRequest request,ServerHttpResponse response,WebSocketHandler handler,Exception exception){}
         });

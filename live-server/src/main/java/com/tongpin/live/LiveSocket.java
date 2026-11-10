@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpSession;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
+import org.springframework.session.MapSessionRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.socket.*;
@@ -12,10 +13,16 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class LiveSocket extends TextWebSocketHandler {
-    private final Db db; private final InteractionService interactions; private final MediaService media; private final RoomBroadcaster rooms; private final ObjectMapper mapper; private final SessionLocks locks;
+    private final Db db; private final InteractionService interactions; private final MediaService media; private final RoomBroadcaster rooms; private final ObjectMapper mapper; private final SessionLocks locks; private final MapSessionRepository sessions;
     private final Map<String,Long> lastActions=new ConcurrentHashMap<>();
-    public LiveSocket(Db db,InteractionService interactions,MediaService media,RoomBroadcaster rooms,ObjectMapper mapper,SessionLocks locks){this.db=db;this.interactions=interactions;this.media=media;this.rooms=rooms;this.mapper=mapper;this.locks=locks;}
-    private String user(WebSocketSession socket){try{return (String)((HttpSession)socket.getAttributes().get("httpSession")).getAttribute("userId");}catch(Exception ex){return null;}}
+    public LiveSocket(Db db,InteractionService interactions,MediaService media,RoomBroadcaster rooms,ObjectMapper mapper,SessionLocks locks,MapSessionRepository sessions){this.db=db;this.interactions=interactions;this.media=media;this.rooms=rooms;this.mapper=mapper;this.locks=locks;this.sessions=sessions;}
+    private String user(WebSocketSession socket){
+        try {
+            Object token=socket.getAttributes().get("authToken");
+            if(token!=null){var session=sessions.findById(token.toString());return session==null?null:session.getAttribute("userId");}
+            return (String)((HttpSession)socket.getAttributes().get("httpSession")).getAttribute("userId");
+        }catch(Exception ex){return null;}
+    }
     private String requiredUser(WebSocketSession socket){String user=user(socket);if(user==null)throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"请登录后参与互动");return user;}
     private void limit(WebSocketSession socket,String type,long interval){String key=socket.getId()+":"+type;long now=Db.now();Long last=lastActions.put(key,now);if(last!=null && now-last<interval)throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"操作过于频繁，请稍后重试");}
     private String str(Map<?,?> m,String key){return Db.text(m.get(key));}
@@ -27,6 +34,7 @@ public class LiveSocket extends TextWebSocketHandler {
             if(type.equals("JOIN")){
                 String room=Db.checked(data.get("roomId"),40,"房间编号"),sessionId=str(data,"sessionId");db.one("SELECT id FROM rooms WHERE id=?",room);
                 if(!sessionId.isBlank())db.one("SELECT id FROM live_sessions WHERE id=? AND room_id=?",sessionId,room);
+                String token=str(data,"authToken");if(!token.isBlank())socket.getAttributes().put("authToken",token);else socket.getAttributes().remove("authToken");
                 String old=(String)socket.getAttributes().get("room");if(old!=null)rooms.leave(old,socket);
                 socket.getAttributes().put("room",room);socket.getAttributes().put("liveSession",sessionId);rooms.join(room,socket);
                 rooms.send(socket,Map.of("type","SYSTEM","roomId",room,"message","已进入房间"));return;

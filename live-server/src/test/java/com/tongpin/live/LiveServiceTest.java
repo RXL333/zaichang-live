@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.session.MapSessionRepository;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketMessage;
@@ -29,6 +30,7 @@ class LiveServiceTest {
     @Autowired SessionController sessions;
     @Autowired SessionLocks locks;
     @Autowired LiveSocket socket;
+    @Autowired MapSessionRepository httpSessions;
     @Autowired ObjectMapper mapper;
     String host, viewer, outsider, roomA, roomB, sessionA, sessionB;
 
@@ -109,7 +111,7 @@ class LiveServiceTest {
     }
     @Test void hostApprovalAloneDoesNotPermitPublishing() throws Exception {
         MediaService mockMedia=mock(MediaService.class);
-        LiveSocket testSocket=new LiveSocket(db,interactions,mockMedia,broadcaster,mapper,locks);
+        LiveSocket testSocket=new LiveSocket(db,interactions,mockMedia,broadcaster,mapper,locks,httpSessions);
         var hostMessages=new ArrayList<String>();var viewerMessages=new ArrayList<String>();var otherMessages=new ArrayList<String>();
         WebSocketSession a=connection("host-mic",host,hostMessages), b=connection("viewer-mic",viewer,viewerMessages), c=connection("other-mic",outsider,otherMessages);
         for(WebSocketSession client:List.of(a,b,c)) testSocket.handleTextMessage(client,new TextMessage(mapper.writeValueAsString(Map.of("type","JOIN","roomId",roomA,"sessionId",sessionA))));
