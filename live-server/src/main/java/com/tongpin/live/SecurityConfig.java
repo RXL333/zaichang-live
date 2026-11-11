@@ -18,9 +18,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
     @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
     @Bean CorsConfigurationSource corsConfigurationSource(@Value("${app.public-origin}") String origin,
-                                                            @Value("${app.environment}") String environment) {
+                                                            @Value("${app.environment}") String environment,
+                                                            @Value("${app.extra-origin:}") String extraOrigin) {
         var cors = new CorsConfiguration();
-        cors.setAllowedOrigins("production".equals(environment) ? List.of(origin) :
+        cors.setAllowedOrigins("production".equals(environment) ? (extraOrigin.isBlank()?List.of(origin):List.of(origin,extraOrigin)) :
             List.of(origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:18080", "http://127.0.0.1:18080"));
         cors.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
         cors.setAllowedHeaders(List.of("Content-Type", "X-CSRF-TOKEN", "X-Auth-Token"));

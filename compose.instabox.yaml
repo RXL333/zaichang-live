@@ -13,5 +13,6 @@ services:
     environment:
       APP_ENV: production
       APP_PUBLIC_ORIGIN: https://rxl333.github.io
+      APP_EXTRA_ORIGIN: https://18080-agq4iihhd6ie55qjpl2ezecsrm.instabox.tech
       COOKIE_SECURE: "true"
       PORT: "18080"

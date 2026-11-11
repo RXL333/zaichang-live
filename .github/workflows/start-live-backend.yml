@@ -1,4 +1,4 @@
-name: 启动直播服务
+name: 启动会议服务
 
 on:
   workflow_dispatch:

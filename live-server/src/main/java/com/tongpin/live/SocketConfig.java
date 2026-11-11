@@ -15,8 +15,8 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 
 @Configuration @EnableWebSocket
 public class SocketConfig implements WebSocketConfigurer {
-    private final LiveSocket socket;private final String origin,environment;
-    public SocketConfig(LiveSocket socket,@Value("${app.public-origin}")String origin,@Value("${app.environment}")String environment){this.socket=socket;this.origin=origin;this.environment=environment;}
+    private final LiveSocket socket;private final MeetingSocket meetings;private final String origin,environment,extraOrigin;
+    public SocketConfig(LiveSocket socket,MeetingSocket meetings,@Value("${app.public-origin}")String origin,@Value("${app.environment}")String environment,@Value("${app.extra-origin:}")String extraOrigin){this.socket=socket;this.meetings=meetings;this.origin=origin;this.environment=environment;this.extraOrigin=extraOrigin;}
     @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry){
         var registration=registry.addHandler(socket,"/ws/live").addInterceptors(new HandshakeInterceptor(){
             public boolean beforeHandshake(ServerHttpRequest request,ServerHttpResponse response,WebSocketHandler handler,Map<String,Object> attrs){
@@ -24,7 +24,10 @@ public class SocketConfig implements WebSocketConfigurer {
             }
             public void afterHandshake(ServerHttpRequest request,ServerHttpResponse response,WebSocketHandler handler,Exception exception){}
         });
-        if("production".equals(environment)) registration.setAllowedOrigins(origin);
+        if("production".equals(environment)) registration.setAllowedOrigins(extraOrigin.isBlank()?new String[]{origin}:new String[]{origin,extraOrigin});
         else registration.setAllowedOrigins(origin,"http://localhost:5173","http://127.0.0.1:5173","http://localhost:18080","http://127.0.0.1:18080");
+        var conference=registry.addHandler(meetings,"/ws/meetings");
+        if("production".equals(environment)) conference.setAllowedOrigins(extraOrigin.isBlank()?new String[]{origin}:new String[]{origin,extraOrigin});
+        else conference.setAllowedOrigins(origin,"http://localhost:5173","http://127.0.0.1:5173","http://localhost:18080","http://127.0.0.1:18080");
     }
 }

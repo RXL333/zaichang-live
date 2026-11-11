@@ -62,3 +62,36 @@ CREATE TABLE IF NOT EXISTS mic_requests (
  identity VARCHAR(180) NOT NULL, status VARCHAR(20) NOT NULL, created_at BIGINT NOT NULL
 );
 ALTER TABLE mic_requests ADD COLUMN IF NOT EXISTS confirmed BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Meeting data is kept separate from the original live-streaming records.
+CREATE TABLE IF NOT EXISTS meetings (
+ id VARCHAR(40) PRIMARY KEY, meeting_number VARCHAR(12) NOT NULL UNIQUE,
+ owner_id VARCHAR(40) NOT NULL REFERENCES app_users(id), title VARCHAR(80) NOT NULL,
+ password_hash VARCHAR(100), status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+ created_at BIGINT NOT NULL, ended_at BIGINT, chat_seq BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_id, created_at);
+CREATE TABLE IF NOT EXISTS meeting_members (
+ meeting_id VARCHAR(40) NOT NULL REFERENCES meetings(id),
+ user_id VARCHAR(40) NOT NULL REFERENCES app_users(id), nickname VARCHAR(40) NOT NULL,
+ grant_version INT NOT NULL DEFAULT 1, joined_at BIGINT NOT NULL,
+ PRIMARY KEY(meeting_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS meeting_messages (
+ id VARCHAR(40) PRIMARY KEY, meeting_id VARCHAR(40) NOT NULL REFERENCES meetings(id),
+ user_id VARCHAR(40) NOT NULL REFERENCES app_users(id), nickname VARCHAR(40) NOT NULL,
+ content VARCHAR(1000) NOT NULL, client_id VARCHAR(100) NOT NULL, seq BIGINT NOT NULL,
+ created_at BIGINT NOT NULL, UNIQUE(meeting_id, user_id, client_id), UNIQUE(meeting_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_messages ON meeting_messages(meeting_id, seq);
+CREATE TABLE IF NOT EXISTS meeting_ingresses (
+ meeting_id VARCHAR(40) NOT NULL REFERENCES meetings(id),
+ user_id VARCHAR(40) NOT NULL REFERENCES app_users(id),
+ ingress_id VARCHAR(120) NOT NULL, identity VARCHAR(180) NOT NULL,
+ created_at BIGINT NOT NULL, PRIMARY KEY(meeting_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS meeting_media_grants (
+ identity VARCHAR(180) PRIMARY KEY, meeting_id VARCHAR(40) NOT NULL REFERENCES meetings(id),
+ user_id VARCHAR(40) NOT NULL REFERENCES app_users(id), created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_media_grants ON meeting_media_grants(meeting_id,user_id);

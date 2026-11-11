@@ -1,31 +1,26 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Search, Video, Compass, Heart, Radio, ArrowUpRight, Menu, X, LogOut } from 'lucide-vue-next'
+import { LogOut, Menu, X } from 'lucide-vue-next'
 import { useUser } from './stores/user'
 import AccountDialog from './components/AccountDialog.vue'
 import LogoMark from './components/LogoMark.vue'
 
-const user = useUser(), router = useRouter(), route = useRoute(), query = ref(''), mobileMenu = ref(false)
-onMounted(() => user.load())
-function search() { router.push({ path: '/', query: query.value.trim() ? { q: query.value.trim() } : {} }); mobileMenu.value = false }
-function studio() { if (user.require(() => router.push('/studio'))) router.push('/studio') }
-async function logout() { await user.logout(); router.push('/') }
+const user=useUser(),route=useRoute(),router=useRouter(),menu=ref(false)
+onMounted(()=>user.load())
+async function logout(){try{await user.logout();menu.value=false;router.push('/')}catch{/* The current session stays visible if logout failed. */}}
+async function myMeetings(){await router.push('/');document.getElementById('meetings')?.scrollIntoView({behavior:'smooth'})}
 </script>
 <template>
-  <div class="app-shell">
-    <header class="topbar">
-      <RouterLink to="/" class="brand" aria-label="在场直播首页"><LogoMark /><span>在场<span class="brand-live"> LIVE</span></span></RouterLink>
-      <nav class="top-nav" aria-label="主导航"><RouterLink to="/" :class="{ selected: route.path === '/' }">发现</RouterLink><RouterLink to="/following">我的关注</RouterLink></nav>
-      <form class="search-box" role="search" @submit.prevent="search"><Search :size="18" /><input v-model="query" aria-label="搜索直播间" placeholder="搜索你感兴趣的" /><button aria-label="搜索" type="submit"><span>搜索</span></button></form>
-      <div class="header-actions"><button class="button button-dark go-live" @click="studio"><Video :size="17" /> 我要开播</button><button v-if="!user.current" class="button button-outline login-button" @click="user.openAuth()">登录 / 注册</button><div v-else class="user-menu"><button class="user-trigger"><span class="avatar tiny">{{ user.current.nickname?.slice(0, 1) }}</span><span>{{ user.current.nickname }}</span></button><div class="user-dropdown"><button @click="studio"><Radio :size="16" /> 主播工作台</button><button @click="logout"><LogOut :size="16" /> 退出登录</button></div></div></div>
-      <button class="icon-button mobile-menu-button" :aria-label="mobileMenu ? '关闭菜单' : '打开菜单'" @click="mobileMenu = !mobileMenu"><X v-if="mobileMenu" :size="22" /><Menu v-else :size="22" /></button>
+  <div class="conference-app" :class="{ 'inside-meeting': route.path.startsWith('/meeting/') }">
+    <header v-if="!route.path.startsWith('/meeting/')" class="site-header">
+      <RouterLink to="/" class="site-brand" aria-label="在场会议首页"><LogoMark /><span>在场会议<small>ZAICHANG MEET</small></span></RouterLink>
+      <nav class="site-nav" aria-label="导航"><RouterLink to="/">会议</RouterLink><a href="/#meetings" @click.prevent="myMeetings">我的会议</a></nav>
+      <div class="site-account"><span class="header-caption">让交流，更有意义。</span><button v-if="!user.current" class="button button-outline" @click="user.openAuth()">登录 / 注册</button><div v-else class="account-wrap"><button class="account-button" @click="menu=!menu" :aria-expanded="menu"><span class="avatar tiny">{{ user.current.nickname?.slice(0,1) }}</span><span>{{ user.current.nickname }}</span></button><div v-if="menu" class="account-popover"><button @click="logout"><LogOut :size="15" /> 退出登录</button></div></div></div>
+      <button class="site-mobile-menu" @click="menu=!menu" :aria-label="menu ? '关闭菜单' : '打开菜单'"><X v-if="menu" :size="22"/><Menu v-else :size="22"/></button>
+      <div v-if="menu" class="mobile-account"><button v-if="!user.current" @click="user.openAuth();menu=false">登录 / 注册</button><button v-else @click="logout">退出登录</button></div>
     </header>
-    <div v-if="mobileMenu" class="mobile-menu"><RouterLink to="/" @click="mobileMenu = false">发现直播</RouterLink><RouterLink to="/following" @click="mobileMenu = false">我的关注</RouterLink><button @click="studio(); mobileMenu = false">我要开播</button><button v-if="!user.current" @click="user.openAuth(); mobileMenu = false">登录 / 注册</button><button v-else @click="logout(); mobileMenu = false">退出登录</button></div>
-    <div class="main-layout">
-      <aside class="sidebar" aria-label="侧边导航"><div class="sidebar-group"><span class="sidebar-label">EXPLORE / 探索</span><RouterLink to="/" class="side-link" :class="{ active: route.path === '/' }"><Compass :size="19" /> 发现直播 <ArrowUpRight :size="14" class="side-arrow" /></RouterLink><RouterLink to="/following" class="side-link"><Heart :size="19" /> 我的关注</RouterLink><button class="side-link" @click="studio"><Radio :size="19" /> 主播中心</button></div><div class="sidebar-note"><span class="sidebar-note-star">✳</span><strong>分享观点，<br />连接彼此。</strong><span>LIVE STREAMING<br />CONNECT &amp; SHARE.</span></div><div class="sidebar-footer">© ZAICHANG LIVE<br /><span>LIVE IN THE MOMENT.</span></div></aside>
-      <main class="page-content"><RouterView :key="route.fullPath" /></main>
-    </div>
+    <RouterView :key="route.fullPath" />
     <AccountDialog />
   </div>
 </template>

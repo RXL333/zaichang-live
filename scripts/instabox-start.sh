@@ -18,7 +18,7 @@ cd "$project_dir"
 docker compose -f compose.instabox.yaml up -d --build
 for attempt in {1..60}; do
   if curl --fail --silent --max-time 3 http://127.0.0.1:18080/api/system/status >/dev/null; then
-    printf '直播后端已启动。GitHub Pages 可连接这台云电脑。\n'
+    printf '会议服务已启动。GitHub Pages 可连接这台云电脑。\n'
     exit 0
   fi
   sleep 2

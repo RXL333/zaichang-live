@@ -2,13 +2,11 @@
 
 | 课程内容 | 项目中的对应位置 |
 | --- | --- |
-| 第 1–3 周：HTTP、REST、JSON 和前后端交互 | `live-server/.../AuthController.java`、`RoomController.java`、`SessionController.java`；前端 `live-web/src/api.js` |
-| 第 4–6 周：WebSocket、房间与消息广播 | `SocketConfig.java`、`LiveSocket.java`、`RoomBroadcaster.java` 和 `live-web/src/liveSocket.js`；包含 `JOIN`、`DANMAKU`、`USER_COUNT`、`SYSTEM`、`ERROR` 等消息 |
-| 第 7 周：弹幕展示与动画 | `live-web/src/components/DanmakuLayer.vue`；消息进入轨道，动画结束后清理，页面可以关闭弹幕 |
-| 回调：事件处理与异步响应 | `liveSocket.js` 的消息和连接状态回调；`RoomInteractions.vue` 对消息、恢复和互动事件的处理 |
-| 数据库 | `live-server/src/main/resources/schema.sql` 和 `Db.java`；正式环境使用 PostgreSQL |
-| 媒体通信与权限 | `MediaService.java` 签发 LiveKit 凭证，`RoomView.vue` 和 `StudioView.vue` 管理媒体连接 |
+| HTTP、REST、JSON | `AuthController.java`、`MeetingController.java`；前端 `api.js` |
+| WebSocket 与会议隔离 | `SocketConfig.java`、`MeetingSocket.java`、`meetingSocket.js`；连接、聊天、成员变化和管理指令均按会议处理 |
+| 回调与断线恢复 | `meetingSocket.js` 的事件和连接状态回调；会议页面在重新连接后重新获取聊天记录和成员状态 |
+| 数据库与事务 | `schema.sql`、`Db.java`、`MeetingService.java`；会议消息按客户端消息编号去重 |
+| 账号和访问权限 | `AuthController.java`、`SecurityConfig.java`、`MeetingService.java`；密码哈希存储，服务端校验会议加入和主持人权限 |
+| 音视频和 OBS | `MeetingMediaService.java` 签发会议媒体凭证并创建 OBS Ingress；`MeetingRoomView.vue`、`MeetingMedia.vue` 管理浏览器媒体和画面 |
 
-浏览器调用 `fetch()` 时立即得到的是 `Promise`，等待结果后才能读取响应；项目的 `api.js` 用 `await` 处理这一过程。
-
-**人数口径：** WebSocket 的 `USER_COUNT` 表示房间中的互动连接数；展示给观众的观看人数基于媒体服务中的实际观众身份去重，并排除主播。一个账号在多个页面打开不会被重复算作多个观众。
+`fetch()` 在结果未到达时返回 Promise；`api.js` 使用 `await` 处理响应。视频由 LiveKit Cloud 转发，WebSocket 聊天与会议管理由本项目后端实现。

@@ -40,7 +40,7 @@ async function submit() {
         <button class="icon-button modal-close" aria-label="关闭" @click="user.closeAuth()"><X :size="20" /></button>
         <div class="modal-eyebrow">ACCOUNT / 账号 <span>✳</span></div>
         <h2 id="auth-title">{{ mode === 'login' ? '登录在场' : '创建账号' }}</h2>
-        <p id="auth-description" class="muted">{{ mode === 'login' ? '登录后参与直播互动。' : '创建账号，开启直播与互动。' }}</p>
+        <p id="auth-description" class="muted">{{ mode === 'login' ? '登录后创建或加入会议。' : '创建账号，开始你的会议。' }}</p>
         <form class="form-stack" @submit.prevent="submit">
           <label>账号<input ref="usernameInput" v-model.trim="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="3–32 位字母、数字或下划线" /></label>
           <label v-if="mode === 'register'">你的昵称<input v-model.trim="nickname" required maxlength="40" autocomplete="nickname" placeholder="大家会这样称呼你" /></label>
