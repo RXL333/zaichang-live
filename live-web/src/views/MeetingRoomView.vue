@@ -7,6 +7,8 @@ import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
 import MeetingMedia from '../components/MeetingMedia.vue'
+import LogoMark from '../components/LogoMark.vue'
+import { groupNumber } from '../format'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
@@ -105,16 +107,74 @@ onMounted(load)
 onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);socket?.close();room.value?.disconnect()})
 </script>
 <template>
-  <main class="conference-page"><div v-if="loading" class="conference-full-state"><span class="loader"></span> 正在进入会议…</div><div v-else-if="fatal" class="conference-full-state"><strong>{{ fatal }}</strong><button class="meeting-button outline" @click="router.push('/')">返回首页</button></div><template v-else-if="meeting">
-    <header class="conference-header"><div class="conference-title"><button class="conference-back" aria-label="返回首页" @click="leave"><ArrowLeft :size="19"/></button><span class="mini-logo">✳</span><div><strong>{{ meeting.title }}</strong><small>会议号 {{ number }}</small></div></div><div class="conference-header-right"><span class="connection-status" :class="connection"><i></i>{{ connectionText }}</span><button class="meeting-button conference-share" @click="copy(inviteUrl(),'邀请链接已复制')"><Copy :size="15"/> 邀请</button><button v-if="isHost" class="end-meeting" @click="endMeeting">结束会议</button><button class="user-initial" :title="localMember?.nickname || meeting.nickname" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button></div></header>
-    <div class="conference-layout"><section class="conference-main"><div class="meeting-topline"><div><span class="section-index">MEETING IN PROGRESS</span><h1>与彼此，在此刻。</h1></div><span class="meeting-count"><Users :size="15"/> {{ connection==='connected' ? members.length : '—' }} 位成员</span></div><MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState"/><div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div><div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
-      <div class="conference-toolbar"><div class="toolbar-left"><span class="toolbar-clock">{{ meeting.title }}</span><small>{{ number }}</small></div><div class="toolbar-controls"><button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button><button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button><button class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button><button class="meeting-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button><button class="meeting-control leave-control" @click="leave"><LogOut :size="20"/><span>离开</span></button></div><div class="toolbar-right"></div></div>
-    </section><aside class="conference-side"><div class="side-heading"><div><span class="section-index">TOGETHER / 在场</span><h2>会议互动</h2></div><span class="side-heading-symbol">✳</span></div><div class="conference-tabs" role="tablist"><button role="tab" :aria-selected="panel==='members'" :class="{active:panel==='members'}" @click="panel='members'"><Users :size="16"/> 成员 <span>{{ members.length }}</span></button><button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天</button></div>
-      <div v-if="panel==='members'" class="members-panel"><div class="side-caption">{{ connection==='connected' ? `当前 ${members.length} 人在会` : connectionText }}<span>仅会议成员可见</span></div><div v-for="member in members" :key="member.userId" class="member-row"><span class="member-avatar">{{ member.nickname?.slice(0,1) }}</span><div class="member-name"><strong>{{ member.nickname }}{{ member.userId===user.current.id ? '（我）' : '' }}</strong><small>{{ member.host ? '主持人' : '参会者' }} · {{ mediaState==='connected' ? (memberMedia[member.userId]?.publishing ? '推流中' : '未推流') : '音视频未连接' }} · {{ mediaState==='connected' ? (memberMedia[member.userId]?.microphone ? '麦克风开' : '麦克风关') : '麦克风状态未知' }}</small></div><button v-if="isHost && member.userId!==user.current.id" class="member-menu-button" :aria-label="`管理 ${member.nickname}`" @click="menu=menu===member.userId ? '' : member.userId"><MoreHorizontal :size="19"/></button><button v-else-if="member.userId===user.current.id" class="member-menu-button" aria-label="修改我的昵称" @click="openRename(member)"><Settings2 :size="16"/></button><div v-if="menu===member.userId" class="member-popover"><button @click="manage('MUTE',member)">静音</button><button @click="openRename(member)">修改昵称</button><button class="danger-text" @click="manage('KICK',member)">移出会议</button></div></div><div v-if="!members.length" class="panel-empty">正在同步成员…</div><div class="side-tip"><span>✳</span><p>专注当下，<br/><strong>一起把事情说清楚。</strong></p></div></div>
-      <template v-else><div ref="chatList" class="conference-chat"><div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>从一句话开始</strong><span>会议消息只对当前成员可见。</span></div><div v-for="message in messages" :key="message.id" class="conference-message"><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div><div v-for="message in pending" :key="message.client_id" class="conference-message pending"><div><strong>{{ message.nickname }}</strong><time>发送中</time></div><p>{{ message.content }}</p></div></div><form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form></template>
-    </aside></div>
-    <Teleport to="body"><div v-if="renameTarget" class="modal-backdrop" @click.self="renameTarget=null" @keydown.esc="renameTarget=null"><section class="modal meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><button class="icon-button modal-close" aria-label="关闭" @click="renameTarget=null"><X :size="20"/></button><span class="section-index">DISPLAY NAME</span><h2 id="rename-title">修改会议昵称</h2><p class="muted">此昵称只在当前会议中显示。</p><form class="form-stack" @submit.prevent="rename"><label>会议昵称<input v-model.trim="renameValue" maxlength="40" required/></label><button class="meeting-button primary full">保存昵称 <Check :size="17"/></button></form></section></div>
-      <div v-if="obsDialog" class="modal-backdrop" @click.self="obsDialog=false" @keydown.esc="obsDialog=false"><section class="modal meeting-dialog obs-dialog" role="dialog" aria-modal="true" aria-labelledby="obs-title"><button class="icon-button modal-close" aria-label="关闭" @click="obsDialog=false"><X :size="20"/></button><span class="section-index">OBS STUDIO</span><h2 id="obs-title">通过 OBS 推流</h2><p class="muted">在 OBS 的“设置 → 推流”中选择 WHIP，填入下面的信息。OBS 与浏览器请勿同时采集同一个麦克风，以免产生回声。</p><template v-if="obsInfo"><div class="obs-fields"><label>服务器地址<div><input readonly :value="obsInfo.url"/><button @click="copy(obsInfo.url)"><Copy :size="16"/></button></div></label><label>Bearer Token<div><input readonly :type="showKey?'text':'password'" :value="obsInfo.streamKey"/><button @click="showKey=!showKey">{{ showKey ? '隐藏' : '显示' }}</button><button @click="copy(obsInfo.streamKey)"><Copy :size="16"/></button></div></label></div><p class="obs-note">请勿向他人泄露 Token。重新生成会使原推流地址失效。</p><div class="obs-actions"><button class="meeting-button outline" :disabled="obsLoading" @click="stopObs">停止推流</button><button class="meeting-button primary" :disabled="obsLoading" @click="createObs">重新生成</button></div></template><button v-else class="meeting-button primary full obs-create" :disabled="obsLoading" @click="createObs">{{ obsLoading ? '正在生成…' : '生成推流信息' }} <ArrowRight :size="17"/></button></section></div></Teleport>
-    <div v-if="notice" class="toast" role="status">{{ notice }}</div>
-  </template></main>
+  <main class="conference-page">
+    <div v-if="loading" class="conference-full-state"><span class="loader"></span> 正在进入会议…</div>
+    <div v-else-if="fatal" class="conference-full-state"><strong>{{ fatal }}</strong><button class="meeting-button outline" @click="router.push('/')">返回首页</button></div>
+    <template v-else-if="meeting">
+      <header class="conference-header">
+        <div class="conference-title">
+          <button class="conference-back" aria-label="离开会议并返回首页" @click="leave"><ArrowLeft :size="19"/></button>
+          <LogoMark />
+          <div><strong>{{ meeting.title }}</strong><small>{{ groupNumber(number) }}</small></div>
+        </div>
+        <div class="conference-header-right">
+          <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
+          <button class="meeting-button conference-share" aria-label="邀请参会者" @click="copy(inviteUrl(),'邀请链接已复制')"><Copy :size="15"/> <span>邀请</span></button>
+          <button v-if="isHost" class="end-meeting" @click="endMeeting">结束会议</button>
+          <button class="user-initial" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
+        </div>
+      </header>
+      <div class="conference-layout">
+        <section class="conference-main">
+          <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState"/>
+          <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>
+          <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
+          <div class="conference-toolbar">
+            <div class="toolbar-controls">
+              <button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button>
+              <button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button>
+              <button class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
+              <button class="meeting-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
+              <button class="meeting-control leave-control" @click="leave"><LogOut :size="20"/><span>离开</span></button>
+            </div>
+          </div>
+        </section>
+        <aside class="conference-side">
+          <div class="conference-tabs" role="tablist">
+            <button role="tab" :aria-selected="panel==='members'" :class="{active:panel==='members'}" @click="panel='members'"><Users :size="16"/> 成员 <span>{{ members.length }}</span></button>
+            <button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天</button>
+          </div>
+          <div v-if="panel==='members'" class="members-panel">
+            <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
+            <div v-for="member in members" :key="member.userId" class="member-row">
+              <span class="member-avatar">{{ member.nickname?.slice(0,1) }}</span>
+              <div class="member-name"><strong>{{ member.nickname }}{{ member.userId===user.current.id ? '（我）' : '' }}</strong><small>{{ member.host ? '主持人' : '参会者' }} · {{ mediaState==='connected' ? (memberMedia[member.userId]?.publishing ? '推流中' : '未推流') : '音视频未连接' }}</small></div>
+              <span class="member-mic" :class="{ on: mediaState==='connected' && memberMedia[member.userId]?.microphone }" :title="mediaState==='connected' ? (memberMedia[member.userId]?.microphone ? '麦克风开' : '麦克风关') : '麦克风状态未知'"><Mic v-if="mediaState==='connected' && memberMedia[member.userId]?.microphone" :size="16"/><MicOff v-else :size="16"/></span>
+              <button v-if="isHost && member.userId!==user.current.id" class="member-menu-button" :aria-label="`管理 ${member.nickname}`" @click="menu=menu===member.userId ? '' : member.userId"><MoreHorizontal :size="19"/></button>
+              <button v-else-if="member.userId===user.current.id" class="member-menu-button" aria-label="修改我的昵称" @click="openRename(member)"><Settings2 :size="16"/></button>
+              <div v-if="menu===member.userId" class="member-popover"><button @click="manage('MUTE',member)">静音</button><button @click="openRename(member)">修改昵称</button><button class="danger-text" @click="manage('KICK',member)">移出会议</button></div>
+            </div>
+            <div v-if="!members.length" class="panel-empty">正在同步成员…</div>
+          </div>
+          <template v-else>
+            <div ref="chatList" class="conference-chat">
+              <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
+              <div v-for="message in messages" :key="message.id" class="conference-message"><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div>
+              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><div><strong>{{ message.nickname }}</strong><time>发送中</time></div><p>{{ message.content }}</p></div>
+            </div>
+            <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
+          </template>
+        </aside>
+      </div>
+      <Teleport to="body">
+        <div v-if="renameTarget" class="modal-backdrop" @click.self="renameTarget=null" @keydown.esc="renameTarget=null">
+          <section class="modal meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><button class="icon-button modal-close" aria-label="关闭" @click="renameTarget=null"><X :size="20"/></button><h2 id="rename-title">修改会议昵称</h2><p class="muted">此昵称只在当前会议中显示。</p><form class="form-stack" @submit.prevent="rename"><label>会议昵称<input v-model.trim="renameValue" maxlength="40" required/></label><button class="meeting-button primary full">保存昵称 <Check :size="17"/></button></form></section>
+        </div>
+        <div v-if="obsDialog" class="modal-backdrop" @click.self="obsDialog=false" @keydown.esc="obsDialog=false">
+          <section class="modal meeting-dialog obs-dialog" role="dialog" aria-modal="true" aria-labelledby="obs-title"><button class="icon-button modal-close" aria-label="关闭" @click="obsDialog=false"><X :size="20"/></button><h2 id="obs-title">通过 OBS 推流</h2><p class="muted">在 OBS 的“设置 → 推流”中选择 WHIP，填入下面的信息。OBS 与浏览器请勿同时采集同一个麦克风，以免产生回声。</p><template v-if="obsInfo"><div class="obs-fields"><label>服务器地址<div><input readonly :value="obsInfo.url"/><button @click="copy(obsInfo.url)" aria-label="复制服务器地址"><Copy :size="16"/></button></div></label><label>Bearer Token<div><input readonly :type="showKey?'text':'password'" :value="obsInfo.streamKey"/><button @click="showKey=!showKey">{{ showKey ? '隐藏' : '显示' }}</button><button @click="copy(obsInfo.streamKey)" aria-label="复制 Token"><Copy :size="16"/></button></div></label></div><p class="obs-note">请勿向他人泄露 Token。重新生成会使原推流地址失效。</p><div class="obs-actions"><button class="meeting-button outline" :disabled="obsLoading" @click="stopObs">停止推流</button><button class="meeting-button primary" :disabled="obsLoading" @click="createObs">重新生成</button></div></template><button v-else class="meeting-button primary full obs-create" :disabled="obsLoading" @click="createObs">{{ obsLoading ? '正在生成…' : '生成推流信息' }} <ArrowRight :size="17"/></button></section>
+        </div>
+      </Teleport>
+      <div v-if="notice" class="toast" role="status">{{ notice }}</div>
+    </template>
+  </main>
 </template>

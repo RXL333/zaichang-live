@@ -38,7 +38,6 @@ async function submit() {
     <div v-if="user.authOpen" class="modal-backdrop" @click.self="user.closeAuth()" @keydown.esc.stop.prevent="user.closeAuth()" @keydown.tab="keepFocus">
       <section ref="dialog" class="modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-description">
         <button class="icon-button modal-close" aria-label="关闭" @click="user.closeAuth()"><X :size="20" /></button>
-        <div class="modal-eyebrow">ACCOUNT / 账号 <span>✳</span></div>
         <h2 id="auth-title">{{ mode === 'login' ? '登录在场' : '创建账号' }}</h2>
         <p id="auth-description" class="muted">{{ mode === 'login' ? '登录后创建或加入会议。' : '创建账号，开始你的会议。' }}</p>
         <form class="form-stack" @submit.prevent="submit">
