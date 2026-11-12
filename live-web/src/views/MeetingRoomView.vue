@@ -16,6 +16,7 @@ import InviteQr from '../components/InviteQr.vue'
 import { invitationText, meetingUrl } from '../invitation'
 import { loadDevicePreferences, supportsSpeakerSelection, useJoinDevices } from '../devicePreferences'
 import { useMeetingDevices } from '../useMeetingDevices'
+import { adjustVideoQuality } from '../networkQuality'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
@@ -25,6 +26,7 @@ const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(
 const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 const inviteDialog=ref(false)
 const deviceMenu=ref('')
+const networkQuality=ref('unknown'),qualityReduced=ref(false)
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
@@ -57,9 +59,9 @@ function handleEvent(event){
   if(event.type==='NOTICE')flash(event.message)
   if(event.type==='ERROR'){
     if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed)failed.failed=true}
-    flash(event.message);if(connection.value==='expired'){fatal.value=event.message;room.value?.disconnect()}
+    flash(event.message);if(connection.value==='expired'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
   }
-  if(event.type==='KICKED' || event.type==='ENDED'){leaving=true;fatal.value=event.message;room.value?.disconnect();room.value=null}
+  if(event.type==='KICKED' || event.type==='ENDED'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
 }
 function connectSocket(){
   socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
@@ -78,12 +80,20 @@ async function connectMedia(){
       ...(deviceDefaults.speakerId && supportsSpeakerSelection() ? {audioOutput:{deviceId:deviceDefaults.speakerId}} : {}),
     })
     next.on(RoomEvent.Reconnecting,()=>{if(generation===mediaGeneration)mediaState.value='reconnecting'})
-    next.on(RoomEvent.Reconnected,()=>{if(generation===mediaGeneration){mediaState.value='connected';mediaError.value=''}})
-    next.on(RoomEvent.Disconnected,()=>{if(generation===mediaGeneration && !leaving){mediaState.value='error';mediaError.value='音视频连接已断开，请重新连接。';camera.value=false;microphone.value=false;sharing.value=false}})
     const sync=()=>{camera.value=next.localParticipant.isCameraEnabled;microphone.value=next.localParticipant.isMicrophoneEnabled;sharing.value=next.localParticipant.isScreenShareEnabled;mediaRevision.value++}
+    const updateQuality=(quality,participant)=>{
+      if(generation!==mediaGeneration || (participant && participant!==next.localParticipant))return
+      networkQuality.value=quality || 'unknown'
+      const poor=['poor','lost'].includes(networkQuality.value)
+      qualityReduced.value=adjustVideoQuality(next,poor) && poor
+    }
+    next.on(RoomEvent.Reconnected,()=>{if(generation===mediaGeneration){mediaState.value='connected';mediaError.value='';sync();updateQuality(next.localParticipant.connectionQuality,next.localParticipant)}})
+    next.on(RoomEvent.Disconnected,()=>{if(generation===mediaGeneration && !leaving){mediaState.value='error';mediaError.value='音视频连接已断开，请重新连接。';camera.value=false;microphone.value=false;sharing.value=false;networkQuality.value='unknown';qualityReduced.value=false}})
+    next.on(RoomEvent.ConnectionQualityChanged,updateQuality)
+    next.on(RoomEvent.TrackSubscribed,()=>{if(['poor','lost'].includes(networkQuality.value))qualityReduced.value=adjustVideoQuality(next,true) || qualityReduced.value})
     for(const event of [RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished])if(event)next.on(event,sync)
     room.value=next;await next.connect(credentials.url,credentials.token)
-    if(generation!==mediaGeneration){await next.disconnect();return}mediaState.value='connected';sync()
+    if(generation!==mediaGeneration){await next.disconnect();return}mediaState.value='connected';sync();updateQuality(next.localParticipant.connectionQuality,next.localParticipant)
     if(initialMedia){
       const selected=initialMedia;initialMedia=null;deviceBusy.value=true
       try{
@@ -183,11 +193,13 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <button class="user-initial" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
         </div>
       </header>
+      <div v-if="connection==='reconnecting' || mediaState==='reconnecting'" class="connection-banner" role="status">正在重新连接，连接恢复后可继续发送消息。</div>
       <div class="conference-layout">
         <section class="conference-main">
           <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number" @invite="copy(inviteText,'邀请信息已复制')"/>
           <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>
           <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
+          <div v-else-if="['poor','lost'].includes(networkQuality)" class="conference-alert" role="status">{{ qualityReduced ? '网络不稳定，已请求降低画质。' : '网络不稳定，请检查网络连接。' }}</div>
           <div class="conference-toolbar">
             <div class="toolbar-controls">
               <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button><button class="device-arrow" aria-label="选择麦克风和扬声器" :aria-expanded="deviceMenu==='audioinput'" @click="openDeviceMenu('audioinput')"><ChevronUp :size="14"/></button>

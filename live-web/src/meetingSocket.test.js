@@ -26,4 +26,12 @@ describe('meeting connection',()=>{
     expect(FakeSocket.instances).toHaveLength(2);expect(events.at(-1).type).toBe('KICKED')
     connection.close()
   })
+  it.each(['KICKED','ENDED'])('does not reconnect or send after %s',type=>{
+    const connection=createMeetingSocket({number:'123456789'})
+    const socket=FakeSocket.instances[0];socket.open();socket.receive({type:'JOINED'})
+    socket.receive({type});expect(connection.send({type:'CHAT',content:'test'})).toBe(false)
+    socket.close();vi.advanceTimersByTime(60000)
+    expect(FakeSocket.instances).toHaveLength(1)
+    connection.close()
+  })
 })

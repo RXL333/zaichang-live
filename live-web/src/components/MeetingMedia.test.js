@@ -20,6 +20,11 @@ describe('meeting media',()=>{
     expect(wrapper.find('.conference-tile').classes()).toContain('speaking')
     expect(audio.attach).toHaveBeenCalledTimes(1)
     expect(audio.detach).not.toHaveBeenCalled()
+    remote.connectionQuality='poor'
+    handlers.get(RoomEvent.ConnectionQualityChanged)?.('poor',remote)
+    await nextTick()
+    expect(wrapper.get('[aria-label="连接质量：差"]').exists()).toBe(true)
+    expect(audio.detach).not.toHaveBeenCalled()
     wrapper.unmount()
     expect(audio.detach).toHaveBeenCalledTimes(1)
   })

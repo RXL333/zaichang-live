@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Mic, MicOff, MonitorUp, Pin, PinOff, Volume2
 import MediaTile from './MediaTile.vue'
 import LogoMark from './LogoMark.vue'
 import { groupNumber } from '../format'
+import { connectionQualityLabel } from '../networkQuality'
 
 const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
 const emit=defineEmits(['invite'])
@@ -24,8 +25,8 @@ function attachAudio(){
 }
 function subscribe(room){
   if(!room)return
-  const events=[RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished,RoomEvent.AudioPlaybackStatusChanged,RoomEvent.ActiveSpeakersChanged]
-  listeners=events.filter(Boolean).map(event=>{const callback=event===RoomEvent.ActiveSpeakersChanged?updateSpeakers:update;room.on(event,callback);return {event,callback}});update()
+  const events=[RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished,RoomEvent.AudioPlaybackStatusChanged,RoomEvent.ActiveSpeakersChanged,RoomEvent.ConnectionQualityChanged]
+  listeners=events.filter(Boolean).map(event=>{const callback=[RoomEvent.ActiveSpeakersChanged,RoomEvent.ConnectionQualityChanged].includes(event)?updateSpeakers:update;room.on(event,callback);return {event,callback}});update()
 }
 function unsubscribe(room){if(room)listeners.forEach(({event,callback})=>room.off(event,callback));listeners=[];clearAudio()}
 watch(()=>props.room,(next,old)=>{unsubscribe(old);subscribe(next)},{immediate:true})
@@ -35,18 +36,19 @@ const tiles=computed(()=>{
   const screens=[],people=[]
   for(const member of props.members){
     const sources=participants.filter(p=>uid(p.identity)===member.userId)
-    let camera=null,microphone=false,obs=false,speaking=false
+    let camera=null,microphone=false,obs=false,speaking=false,quality='unknown'
     for(const person of sources){
       const isObs=person.identity?.startsWith('obs.');obs ||= !!isObs
+      if(!isObs || quality==='unknown')quality=person.connectionQuality || 'unknown'
       if(person.isSpeaking)speaking=true
       for(const publication of person.trackPublications.values()){
         if(publication.kind===Track.Kind.Audio && !publication.isMuted && (isObs || publication.source===Track.Source.Microphone))microphone=true
         if(!publication.track || publication.isMuted || publication.kind!==Track.Kind.Video)continue
-        if(publication.source===Track.Source.ScreenShare)screens.push({key:`screen-${person.identity}`,track:publication.track,name:member.nickname,screen:true,local:member.userId===props.userId})
+        if(publication.source===Track.Source.ScreenShare)screens.push({key:`screen-${person.identity}`,track:publication.track,name:member.nickname,screen:true,local:member.userId===props.userId,quality:person.connectionQuality || 'unknown'})
         else if(!camera || isObs)camera=publication.track
       }
     }
-    people.push({key:`person-${member.userId}`,track:camera,name:member.nickname,microphone,obs,speaking,host:member.host,local:member.userId===props.userId})
+    people.push({key:`person-${member.userId}`,track:camera,name:member.nickname,microphone,obs,speaking,host:member.host,local:member.userId===props.userId,quality})
   }
   return [...screens,...people]
 })
@@ -80,6 +82,7 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
         <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
           <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
+          <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>
           <div v-if="tile.screen" class="tile-screen-label"><MonitorUp :size="14"/> {{ tile.name }}的屏幕</div><div v-else class="tile-name"><span>{{ tile.name }}{{ tile.local ? '（我）' : '' }}</span><span v-if="tile.host" class="tile-host">主持人</span><span v-if="tile.obs" class="tile-obs">OBS</span><Mic v-if="tile.microphone" :size="14"/><MicOff v-else class="mic-off" :size="14"/></div>
         </div>
       </div>
