@@ -6,6 +6,7 @@ import { api } from '../api'
 import { formatNumberInput, groupNumber } from '../format'
 import { useUser } from '../stores/user'
 import { useServiceHealth } from '../stores/serviceHealth'
+import { requestError } from '../mediaErrors'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
@@ -39,7 +40,7 @@ async function load(){
   if(!user.current){meetings.value=[];loading.value=false;return}
   loading.value=true
   try{const result=await api('/api/meetings');if(current===requestId)meetings.value=result}
-  catch(e){if(current===requestId)error.value=e.message}
+  catch(e){if(current===requestId)error.value=requestError(e)}
   finally{if(current===requestId)loading.value=false}
 }
 watch(()=>[user.ready,user.current?.id,service.status],([ready,,status])=>{if(ready && status==='ready')load()},{immediate:true})
@@ -71,11 +72,11 @@ async function submit(){
       await api(`/api/meetings/${selected.value.number}`,{method:'PATCH',body:{title:title.value,passwordAction:passwordAction.value,password:password.value}})
       dialog.value='';await load();notify('会议信息已更新')
     }
-  }catch(e){formError.value=e.message}finally{saving.value=false}
+  }catch(e){formError.value=requestError(e)}finally{saving.value=false}
 }
 async function remove(meeting){
   if(!window.confirm(`确定删除“${meeting.title}”？正在进行的会议也会结束。`))return
-  try{await api(`/api/meetings/${meeting.number}`,{method:'DELETE'});await load();notify('会议已删除')}catch(e){notify(e.message)}
+  try{await api(`/api/meetings/${meeting.number}`,{method:'DELETE'});await load();notify('会议已删除')}catch(e){notify(requestError(e))}
 }
 function inviteUrl(value){const base=new URL(import.meta.env.BASE_URL,location.origin);return import.meta.env.VITE_HASH_ROUTER==='true'?`${base.href}#/join/${value}`:`${base.href}join/${value}`}
 async function copy(meeting){

@@ -9,6 +9,7 @@ import { useUser } from '../stores/user'
 import MeetingMedia from '../components/MeetingMedia.vue'
 import LogoMark from '../components/LogoMark.vue'
 import { groupNumber } from '../format'
+import { mediaError as explainMediaError, requestError } from '../mediaErrors'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
@@ -35,7 +36,7 @@ function flash(value){notice.value=value;clearTimeout(noticeTimer);noticeTimer=s
 function inviteUrl(){const base=new URL(import.meta.env.BASE_URL,location.origin);return import.meta.env.VITE_HASH_ROUTER==='true'?`${base.href}#/join/${number}`:`${base.href}join/${number}`}
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
-async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(e.message)}}
+async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
 function handleEvent(event){
   if(event.type==='MEMBERS')members.value=event.members||[]
   if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
@@ -63,7 +64,7 @@ async function connectMedia(){
     for(const event of [RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished])if(event)next.on(event,sync)
     room.value=next;await next.connect(credentials.url,credentials.token)
     if(generation!==mediaGeneration){await next.disconnect();return}mediaState.value='connected';sync()
-  }catch(e){if(generation===mediaGeneration){const failed=room.value;room.value=null;await failed?.disconnect();mediaState.value='error';mediaError.value=e.status ? e.message : '暂时无法连接音视频，请检查网络后重试。'}}
+  }catch(e){if(generation===mediaGeneration){const failed=room.value;room.value=null;await failed?.disconnect();mediaState.value='error';mediaError.value=explainMediaError(e,{operation:'connect'})}}
 }
 async function load(){
   loading.value=true;fatal.value=''
@@ -72,7 +73,7 @@ async function load(){
     if(!user.current){router.replace(`/join/${number}`);return}
     meeting.value=await api(`/api/meetings/${number}/state`)
     connectSocket();connectMedia()
-  }catch(e){if(e.status===401||e.status===403)router.replace(`/join/${number}`);else fatal.value=e.message}
+  }catch(e){if(e.status===401||e.status===403)router.replace(`/join/${number}`);else fatal.value=requestError(e)}
   finally{loading.value=false}
 }
 async function device(kind){
@@ -82,7 +83,7 @@ async function device(kind){
     if(kind==='mic'){await room.value.localParticipant.setMicrophoneEnabled(!microphone.value);microphone.value=room.value.localParticipant.isMicrophoneEnabled}
     if(kind==='camera'){await room.value.localParticipant.setCameraEnabled(!camera.value);camera.value=room.value.localParticipant.isCameraEnabled}
     if(kind==='screen'){await room.value.localParticipant.setScreenShareEnabled(!sharing.value,{audio:false});sharing.value=room.value.localParticipant.isScreenShareEnabled}
-  }catch(e){flash(e.name==='NotAllowedError'?'未获得设备权限，或已取消操作。':'设备无法开启，请检查设备和浏览器权限。')}
+  }catch(e){const message=explainMediaError(e,{operation:kind});if(message)flash(message)}
   finally{deviceBusy.value=false}
 }
 function sendChat(){
@@ -94,14 +95,14 @@ function sendChat(){
 function manage(type,target){menu.value='';if(type==='KICK' && !window.confirm(`确定将“${target.nickname}”移出会议？`))return;if(!socket?.send({type,userId:target.userId}))flash('连接已断开，请稍后重试')}
 function openRename(member){menu.value='';renameTarget.value=member;renameValue.value=member.nickname}
 function rename(){const value=renameValue.value.trim();if(!value)return;if(!socket?.send({type:'RENAME',userId:renameTarget.value.userId,nickname:value}))flash('连接已断开，请稍后重试');renameTarget.value=null}
-async function createObs(){obsLoading.value=true;try{obsInfo.value=await api(`/api/meetings/${number}/obs`,{method:'POST'});showKey.value=false}catch(e){flash(e.message)}finally{obsLoading.value=false}}
-async function stopObs(){obsLoading.value=true;try{await api(`/api/meetings/${number}/obs`,{method:'DELETE'});obsInfo.value=null;flash('OBS 推流已停止')}catch(e){flash(e.message)}finally{obsLoading.value=false}}
+async function createObs(){obsLoading.value=true;try{obsInfo.value=await api(`/api/meetings/${number}/obs`,{method:'POST'});showKey.value=false}catch(e){flash(requestError(e))}finally{obsLoading.value=false}}
+async function stopObs(){obsLoading.value=true;try{await api(`/api/meetings/${number}/obs`,{method:'DELETE'});obsInfo.value=null;flash('OBS 推流已停止')}catch(e){flash(requestError(e))}finally{obsLoading.value=false}}
 async function leave(){
   leaving=true;mediaGeneration++;socket?.close()
   try{await api(`/api/meetings/${number}/obs`,{method:'DELETE'})}catch{flash('OBS 推流未能确认关闭，请在 OBS 中停止推流。')}
   await room.value?.disconnect();room.value=null;router.push('/')
 }
-async function endMeeting(){if(!window.confirm('确定结束本次会议？所有成员将离开会议。'))return;try{await api(`/api/meetings/${number}/end`,{method:'POST'});leaving=true;socket?.close();await room.value?.disconnect();router.push('/')}catch(e){flash(e.message)}}
+async function endMeeting(){if(!window.confirm('确定结束本次会议？所有成员将离开会议。'))return;try{await api(`/api/meetings/${number}/end`,{method:'POST'});leaving=true;socket?.close();await room.value?.disconnect();router.push('/')}catch(e){flash(requestError(e))}}
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
 onMounted(load)
 onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);socket?.close();room.value?.disconnect()})

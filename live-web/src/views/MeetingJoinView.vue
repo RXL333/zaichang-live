@@ -6,9 +6,10 @@ import { api } from '../api'
 import { groupNumber } from '../format'
 import { useUser } from '../stores/user'
 import { useServiceHealth } from '../stores/serviceHealth'
+import { requestError } from '../mediaErrors'
 
 const route=useRoute(),router=useRouter(),user=useUser(),service=useServiceHealth(),meeting=ref(null),loading=ref(true),joining=ref(false),error=ref(''),joinError=ref(''),nickname=ref(''),password=ref('')
-async function load(){loading.value=true;error.value='';try{meeting.value=await api(`/api/meetings/${route.params.number}`)}catch(e){error.value=e.status===404?'没有找到这个会议，请检查会议号。':e.message}finally{loading.value=false}}
+async function load(){loading.value=true;error.value='';try{meeting.value=await api(`/api/meetings/${route.params.number}`)}catch(e){error.value=e.status===404?'没有找到这个会议，请检查会议号。':requestError(e)}finally{loading.value=false}}
 watch(()=>user.current?.nickname,name=>{if(name && !nickname.value)nickname.value=name},{immediate:true})
 watch(()=>user.current?.id,()=>{if(meeting.value)load()})
 watch(()=>service.status,status=>{if(status==='ready')load()},{immediate:true})
@@ -16,7 +17,7 @@ async function join(){
   if(!user.require(join))return
   joining.value=true;joinError.value=''
   try{await api(`/api/meetings/${route.params.number}/join`,{method:'POST',body:{nickname:nickname.value||user.current.nickname,password:password.value}});password.value='';router.push(`/meeting/${route.params.number}`)}
-  catch(e){joinError.value=e.message}finally{joining.value=false}
+  catch(e){joinError.value=requestError(e)}finally{joining.value=false}
 }
 </script>
 <template>

@@ -2,6 +2,7 @@
 import { nextTick, ref, watch } from 'vue'
 import { X, ArrowRight } from 'lucide-vue-next'
 import { useUser } from '../stores/user'
+import { requestError } from '../mediaErrors'
 const user = useUser()
 const mode = ref('login'), username = ref(''), nickname = ref(''), password = ref(''), confirmPassword = ref(''), error = ref(''), loading = ref(false)
 const dialog = ref(null), usernameInput = ref(null)
@@ -29,7 +30,7 @@ async function submit() {
   if (mode.value === 'register' && password.value !== confirmPassword.value) { error.value = '两次输入的密码不一致，请重新确认。'; return }
   loading.value = true
   try { await user.authenticate(mode.value, { username: username.value, nickname: nickname.value, password: password.value }) }
-  catch (e) { error.value = e.message }
+  catch (e) { error.value = requestError(e) }
   finally { loading.value = false }
 }
 </script>
