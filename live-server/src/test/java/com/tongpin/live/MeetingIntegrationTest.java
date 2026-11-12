@@ -67,6 +67,7 @@ class MeetingIntegrationTest {
         var another=request("POST","/api/meetings",other,json(Map.of("title","另一会议")));
         assertEquals(200,another.statusCode(),another.body());String otherNumber=object(another.body()).get("number").toString();
         assertEquals(403,request("GET","/api/meetings/"+number+"/messages",guest,null).statusCode());
+        assertEquals(403,request("POST","/api/meetings/"+number+"/media-token",guest,null).statusCode());
         assertEquals(403,request("POST","/api/meetings/"+number+"/join",guest,json(Map.of("password","wrong"))).statusCode());
         assertEquals(200,request("POST","/api/meetings/"+number+"/join",host,json(Map.of())).statusCode());
         assertEquals(200,request("POST","/api/meetings/"+number+"/join",guest,json(Map.of("password","1234","nickname","参会者"))).statusCode());
@@ -86,6 +87,7 @@ class MeetingIntegrationTest {
             a.socket().sendText(json(Map.of("type","KICK","userId",guest.id())),true).join();
             assertTrue(waitFor(b.events(),"\"type\":\"KICKED\"",5000));
             assertEquals(403,request("GET","/api/meetings/"+number+"/state",guest,null).statusCode());
+            assertEquals(403,request("POST","/api/meetings/"+number+"/media-token",guest,null).statusCode());
             assertEquals(200,request("POST","/api/meetings/"+number+"/end",host,null).statusCode());
             assertEquals(409,request("POST","/api/meetings/"+number+"/join",guest,json(Map.of("password","1234"))).statusCode());
         } finally {
@@ -103,6 +105,35 @@ class MeetingIntegrationTest {
         assertTrue(token.getSubject().startsWith("user."+guest.id()+"."));
         assertEquals("meeting-"+meeting.get("id"),token.getClaim("video").asMap().get("room"));
         assertEquals(true,token.getClaim("video").asMap().get("canPublish"));
+        assertEquals(true,token.getClaim("video").asMap().get("canSubscribe"));
+        assertEquals(false,token.getClaim("video").asMap().get("canPublishData"));
+        long remaining=token.getExpiresAt().getTime()-System.currentTimeMillis();
+        assertTrue(remaining>0 && remaining<=300_000,"media token must expire within five minutes");
         assertEquals(1,db.jdbc.queryForObject("SELECT COUNT(*) FROM meeting_media_grants WHERE meeting_id=? AND user_id=?",Integer.class,meeting.get("id"),guest.id()));
+    }
+    @Test void repeatedWrongNumbersAndPasswordsAreThrottled() throws Exception {
+        User host=register(),guest=register(),other=register();
+        var created=request("POST","/api/meetings",host,json(Map.of("title","限流测试","password","1234")));
+        String number=object(created.body()).get("number").toString();
+        for(int i=0;i<6;i++)assertEquals(404,request("POST","/api/meetings/000000000/join",guest,json(Map.of("password","wrong"))).statusCode());
+        for(int i=0;i<6;i++)assertEquals(403,request("POST","/api/meetings/"+number+"/join",guest,json(Map.of("password","wrong"))).statusCode());
+        assertEquals(429,request("POST","/api/meetings/"+number+"/join",guest,json(Map.of("password","1234"))).statusCode());
+        assertEquals(200,request("POST","/api/meetings/"+number+"/join",other,json(Map.of("password","1234"))).statusCode());
+    }
+    @Test void chatLengthAndFrequencyAreEnforced() throws Exception {
+        User host=register();var created=request("POST","/api/meetings",host,json(Map.of("title","聊天限流测试")));
+        String number=object(created.body()).get("number").toString();
+        assertEquals(200,request("POST","/api/meetings/"+number+"/join",host,json(Map.of())).statusCode());
+        Socket socket=socket(host,number);
+        try{
+            socket.socket().sendText(json(Map.of("type","CHAT","clientId","long","content","x".repeat(1001))),true).join();
+            assertTrue(waitFor(socket.events(),"\"code\":400",5000));
+            for(int i=0;i<MeetingRateLimiter.CHAT_LIMIT-1;i++)
+                socket.socket().sendText(json(Map.of("type","CHAT","clientId","rate-"+i,"content","消息")),true).join();
+            socket.socket().sendText(json(Map.of("type","CHAT","clientId","rate-over","content","太快")),true).join();
+            assertTrue(waitFor(socket.events(),"\"code\":429",5000));
+            String meetingId=db.one("SELECT id FROM meetings WHERE meeting_number=?",number).get("id").toString();
+            assertEquals(MeetingRateLimiter.CHAT_LIMIT-1,db.jdbc.queryForObject("SELECT COUNT(*) FROM meeting_messages WHERE meeting_id=?",Integer.class,meetingId));
+        }finally{socket.socket().sendClose(WebSocket.NORMAL_CLOSURE,"done").join();}
     }
 }

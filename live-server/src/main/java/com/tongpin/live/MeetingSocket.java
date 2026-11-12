@@ -12,11 +12,11 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class MeetingSocket extends TextWebSocketHandler {
-    private final Db db; private final MeetingService meetings; private final MeetingMediaService media;
+    private final Db db; private final MeetingService meetings; private final MeetingMediaService media; private final MeetingRateLimiter limits;
     private final MapSessionRepository sessions; private final ObjectMapper mapper;private final SessionLocks locks;
     private final Map<String,Set<WebSocketSession>> active=new ConcurrentHashMap<>();
-    public MeetingSocket(Db db,MeetingService meetings,MeetingMediaService media,MapSessionRepository sessions,ObjectMapper mapper,SessionLocks locks){
-        this.db=db;this.meetings=meetings;this.media=media;this.sessions=sessions;this.mapper=mapper;this.locks=locks;
+    public MeetingSocket(Db db,MeetingService meetings,MeetingMediaService media,MapSessionRepository sessions,ObjectMapper mapper,SessionLocks locks,MeetingRateLimiter limits){
+        this.db=db;this.meetings=meetings;this.media=media;this.sessions=sessions;this.mapper=mapper;this.locks=locks;this.limits=limits;
     }
     private void send(WebSocketSession socket,Object value){try{synchronized(socket){if(socket.isOpen())socket.sendMessage(new TextMessage(mapper.writeValueAsString(value)));}}catch(Exception ignored){}}
     private void broadcast(String id,Object value){for(var socket:active.getOrDefault(id,Set.of()))send(socket,value);}
@@ -65,6 +65,7 @@ public class MeetingSocket extends TextWebSocketHandler {
             if("PING".equals(type)){send(socket,Map.of("type","PONG","timestamp",Db.now()));return;}
             switch(type){
                 case "CHAT" -> {
+                    limits.chat(id,uid);
                     var chat=meetings.chat(id,uid,Db.text(data.get("clientId")),Db.text(data.get("content")));
                     var ack=new LinkedHashMap<String,Object>(chat);ack.put("type","CHAT_ACK");send(socket,ack);
                     if(!Boolean.TRUE.equals(chat.get("duplicate"))){var event=new LinkedHashMap<String,Object>(chat);event.put("type","CHAT");broadcast(id,event);}

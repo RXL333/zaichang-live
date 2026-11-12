@@ -45,12 +45,15 @@ function handleEvent(event){
   if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
   if(event.type==='MUTED'){microphone.value=false;flash(event.message)}
   if(event.type==='NOTICE')flash(event.message)
-  if(event.type==='ERROR'){flash(event.message);if(connection.value==='expired'){fatal.value=event.message;room.value?.disconnect()}}
+  if(event.type==='ERROR'){
+    if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed)failed.failed=true}
+    flash(event.message);if(connection.value==='expired'){fatal.value=event.message;room.value?.disconnect()}
+  }
   if(event.type==='KICKED' || event.type==='ENDED'){leaving=true;fatal.value=event.message;room.value?.disconnect();room.value=null}
 }
 function connectSocket(){
   socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
-    await history();for(const item of pending.value)socket?.send({type:'CHAT',clientId:item.client_id,content:item.content})
+    await history();for(const item of pending.value.filter(item=>!item.failed))socket?.send({type:'CHAT',clientId:item.client_id,content:item.content})
   }})
 }
 async function connectMedia(){
@@ -184,7 +187,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
             <div ref="chatList" class="conference-chat">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
               <div v-for="message in messages" :key="message.id" class="conference-message"><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div>
-              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><div><strong>{{ message.nickname }}</strong><time>发送中</time></div><p>{{ message.content }}</p></div>
+              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><div><strong>{{ message.nickname }}</strong><time>{{ message.failed ? '未发送，请稍后复制重试' : '发送中' }}</time></div><p>{{ message.content }}</p></div>
             </div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>

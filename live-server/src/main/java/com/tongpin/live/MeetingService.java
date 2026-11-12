@@ -15,8 +15,9 @@ import static org.springframework.http.HttpStatus.*;
 public class MeetingService {
     private final Db db;
     private final PasswordEncoder passwords;
+    private final MeetingRateLimiter limits;
     private final SecureRandom random = new SecureRandom();
-    public MeetingService(Db db, PasswordEncoder passwords) { this.db=db; this.passwords=passwords; }
+    public MeetingService(Db db, PasswordEncoder passwords, MeetingRateLimiter limits) { this.db=db; this.passwords=passwords; this.limits=limits; }
     static String grantKey(String id) { return "meeting:"+id; }
 
     public Map<String,Object> byNumber(String number) {
@@ -73,7 +74,7 @@ public class MeetingService {
         return publicInfo(byNumber(number),uid);
     }
     public Map<String,Object> join(String number, HttpSession session, Map<String,Object> input) {
-        String uid=db.requireUser(session); Map<String,Object> meeting=byNumber(number); requireOpen(meeting);
+        String uid=db.requireUser(session); limits.join(uid); Map<String,Object> meeting=byNumber(number); requireOpen(meeting);
         Object hash=meeting.get("password_hash");
         if(hash!=null && !Objects.equals(uid,meeting.get("owner_id")) && !passwords.matches(Db.text(input.get("password")),hash.toString()))
             throw new ResponseStatusException(FORBIDDEN,"会议密码不正确");
