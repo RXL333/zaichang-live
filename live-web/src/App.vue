@@ -1,13 +1,17 @@
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { LogOut, Menu, X } from 'lucide-vue-next'
 import { useUser } from './stores/user'
+import { useServiceHealth } from './stores/serviceHealth'
 import AccountDialog from './components/AccountDialog.vue'
 import LogoMark from './components/LogoMark.vue'
+import ServiceStatus from './components/ServiceStatus.vue'
 
-const user=useUser(),route=useRoute(),router=useRouter(),menu=ref(false)
-onMounted(()=>user.load())
+const user=useUser(),service=useServiceHealth(),route=useRoute(),router=useRouter(),menu=ref(false)
+watch(()=>route.path,path=>{if((path==='/' || path.startsWith('/join/')) && service.status==='idle')service.start()},{immediate:true})
+watch(()=>service.status,status=>{if(status==='ready' && (!user.ready || user.loadError))user.load()},{immediate:true})
+onMounted(()=>{if(route.path.startsWith('/meeting/'))user.load()})
 async function logout(){try{await user.logout();menu.value=false;router.push('/')}catch{/* The current session stays visible if logout failed. */}}
 async function myMeetings(){await router.push('/');await nextTick();document.getElementById('meetings')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}
 </script>
@@ -20,6 +24,7 @@ async function myMeetings(){await router.push('/');await nextTick();document.get
       <button class="site-mobile-menu" @click="menu=!menu" :aria-label="menu ? '关闭菜单' : '打开菜单'"><X v-if="menu" :size="22"/><Menu v-else :size="22"/></button>
       <div v-if="menu" class="mobile-account"><button v-if="!user.current" @click="user.openAuth();menu=false">登录 / 注册</button><button v-else @click="logout">退出登录</button></div>
     </header>
+    <ServiceStatus v-if="!route.path.startsWith('/meeting/')" />
     <RouterView :key="route.fullPath" />
     <AccountDialog />
   </div>

@@ -5,8 +5,9 @@ import { ArrowRight, CalendarDays, Check, Copy, LockKeyhole, MicOff, MonitorUp, 
 import { api } from '../api'
 import { formatNumberInput, groupNumber } from '../format'
 import { useUser } from '../stores/user'
+import { useServiceHealth } from '../stores/serviceHealth'
 
-const router=useRouter(),user=useUser(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
+const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
 const reduceMotion=typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const people=[
@@ -41,10 +42,18 @@ async function load(){
   catch(e){if(current===requestId)error.value=e.message}
   finally{if(current===requestId)loading.value=false}
 }
-watch(()=>[user.ready,user.current?.id],([ready])=>{if(ready)load()},{immediate:true})
+watch(()=>[user.ready,user.current?.id,service.status],([ready,,status])=>{if(ready && status==='ready')load()},{immediate:true})
 onMounted(startCycle)
 onBeforeUnmount(()=>{clearInterval(cycle);clearTimeout(toastTimer);clearTimeout(copiedTimer)})
-function create(){if(!user.require(create))return;selected.value=null;title.value='';password.value='';formError.value='';dialog.value='create'}
+async function create(){
+  if(service.status!=='ready'){
+    notify('会议服务正在启动，请稍候')
+    if(!(await service.start())){notify('会议服务暂未就绪，请重试');return}
+  }
+  if(!user.ready || user.loadError)await user.load()
+  if(!user.require(create))return
+  selected.value=null;title.value='';password.value='';formError.value='';dialog.value='create'
+}
 function edit(meeting){selected.value=meeting;title.value=meeting.title;password.value='';passwordAction.value='keep';formError.value='';dialog.value='edit'}
 function onNumberInput(event){const formatted=formatNumberInput(event.target.value);number.value=formatted;event.target.value=formatted}
 function join(){
@@ -101,7 +110,8 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
     </section>
     <section id="meetings" class="my-meetings">
       <div class="section-line"><div><h2>我的会议</h2><p>你创建的会议，可以在这里进入、分享或修改。</p></div><button class="meeting-button subtle" @click="create"><Plus :size="17"/> 创建会议</button></div>
-      <div v-if="!user.ready || loading" class="meeting-empty"><span class="loader"></span><p>正在加载会议…</p></div>
+      <div v-if="service.status==='timeout'" class="meeting-empty"><div><strong>会议服务暂未就绪</strong><p>请重试连接后查看你的会议。</p></div><button class="meeting-button outline" @click="service.start()">重试</button></div>
+      <div v-else-if="service.status!=='ready' || !user.ready || loading" class="meeting-empty"><span class="loader"></span><p>正在加载会议…</p></div>
       <div v-else-if="!user.current" class="meeting-empty"><div class="empty-mark"><LockKeyhole :size="22"/></div><div><strong>登录后查看你的会议</strong><p>创建会议，或通过会议号加入他人的会议。</p></div><button class="meeting-button outline" @click="user.openAuth()">登录账号 <ArrowRight :size="16"/></button></div>
       <div v-else-if="error" class="meeting-empty"><div><strong>暂时无法获取会议</strong><p>{{ error }}</p></div><button class="meeting-button outline" @click="load">重试</button></div>
       <div v-else-if="!meetings.length" class="meeting-empty"><div class="empty-mark"><CalendarDays :size="22"/></div><div><strong>还没有创建会议</strong><p>创建后，会议会出现在这里。</p></div><button class="meeting-button outline" @click="create">创建会议 <ArrowRight :size="16"/></button></div>

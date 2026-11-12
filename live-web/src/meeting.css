@@ -51,6 +51,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .conference-app { min-height: 100vh; overflow-x: clip; }
 .inside-meeting { background: var(--room); color: var(--room-text); }
+.service-status { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 16px; padding:10px 20px; background:#fff3d6; color:#60460c; font-size:14px; }
+.service-status button, .service-status a { border:0; padding:0; background:none; color:inherit; text-decoration:underline; text-underline-offset:3px; font-weight:600; }
+.service-status-enter-active, .service-status-leave-active { transition:opacity .2s ease; }
+.service-status-enter-from, .service-status-leave-to { opacity:0; }
+@media (prefers-reduced-motion: reduce) { .service-status-enter-active, .service-status-leave-active { transition-duration:.12s; } }
 
 /* --------------------------------------------------------------------------
    通用：按钮、表单、弹窗、提示
