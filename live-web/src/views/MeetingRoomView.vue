@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowLeft, ArrowRight, Check, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
@@ -15,6 +15,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import InviteQr from '../components/InviteQr.vue'
 import { invitationText, meetingUrl } from '../invitation'
 import { loadDevicePreferences, supportsSpeakerSelection, useJoinDevices } from '../devicePreferences'
+import { useMeetingDevices } from '../useMeetingDevices'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
@@ -23,6 +24,7 @@ const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),dra
 const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(false),obsDialog=ref(false),obsInfo=ref(null),obsLoading=ref(false),showKey=ref(false),chatList=ref(null),mediaRevision=ref(0)
 const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 const inviteDialog=ref(false)
+const deviceMenu=ref('')
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
@@ -41,6 +43,9 @@ const memberMedia=computed(()=>{
   return result
 })
 function flash(value){notice.value=value;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.value='',4500)}
+const mediaDevices=useMeetingDevices({room,mediaState,notify:flash,initial:deviceDefaults})
+function openDeviceMenu(kind){deviceMenu.value=deviceMenu.value===kind?'':kind;if(deviceMenu.value)mediaDevices.refresh()}
+async function selectDevice(kind,id){if(await mediaDevices.choose(kind,id))deviceMenu.value=''}
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
@@ -185,8 +190,12 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
           <div class="conference-toolbar">
             <div class="toolbar-controls">
-              <button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button>
-              <button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button>
+              <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button><button class="device-arrow" aria-label="选择麦克风和扬声器" :aria-expanded="deviceMenu==='audioinput'" @click="openDeviceMenu('audioinput')"><ChevronUp :size="14"/></button>
+                <div v-if="deviceMenu==='audioinput'" class="device-popover"><strong>麦克风</strong><button :class="{chosen:!mediaDevices.selected.microphoneId}" @click="selectDevice('audioinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audioinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.microphoneId===item.deviceId}" @click="selectDevice('audioinput',item.deviceId)">{{ item.label || `麦克风 ${index+1}` }}</button><template v-if="mediaDevices.speakerSupported"><strong>扬声器</strong><button :class="{chosen:!mediaDevices.selected.speakerId}" @click="selectDevice('audiooutput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audiooutput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.speakerId===item.deviceId}" @click="selectDevice('audiooutput',item.deviceId)">{{ item.label || `扬声器 ${index+1}` }}</button></template></div>
+              </div>
+              <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button><button class="device-arrow" aria-label="选择摄像头" :aria-expanded="deviceMenu==='videoinput'" @click="openDeviceMenu('videoinput')"><ChevronUp :size="14"/></button>
+                <div v-if="deviceMenu==='videoinput'" class="device-popover"><strong>摄像头</strong><button :class="{chosen:!mediaDevices.selected.cameraId}" @click="selectDevice('videoinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='videoinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.cameraId===item.deviceId}" @click="selectDevice('videoinput',item.deviceId)">{{ item.label || `摄像头 ${index+1}` }}</button></div>
+              </div>
               <button class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <button class="meeting-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
               <button class="meeting-control leave-control" @click="confirmKind='leave'"><LogOut :size="20"/><span>离开</span></button>

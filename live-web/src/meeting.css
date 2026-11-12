@@ -535,6 +535,13 @@ span.line.rise { display: block; }
 .meeting-control.leave-control svg { background: var(--danger); color: #fff; }
 .meeting-control.leave-control:hover svg { background: #d44a4a; }
 .meeting-control:disabled { cursor: not-allowed; opacity: .55; }
+.device-control-wrap { position:relative; display:flex; align-items:flex-start; }
+.device-arrow { display:grid; place-items:center; width:23px; height:28px; margin:11px 0 0 -8px; border:0; border-radius:6px; background:var(--room-raise); color:var(--room-text); }
+.device-arrow:hover { background:#304663; }
+.device-popover { position:absolute; z-index:6; left:0; bottom:calc(100% + 10px); display:grid; gap:2px; width:250px; max-height:45vh; overflow:auto; padding:8px; border:1px solid var(--room-line); border-radius:10px; background:var(--room-panel); box-shadow:0 12px 32px #0006; }
+.device-popover strong { padding:7px 8px 4px; color:var(--room-muted); font-size:12px; }
+.device-popover button { padding:8px; border:0; border-radius:6px; background:none; color:var(--room-text); text-align:left; overflow-wrap:anywhere; font-size:13px; }
+.device-popover button:hover, .device-popover button.chosen { background:var(--room-raise); }
 
 .conference-side { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--room-line); border-radius: 16px; background: var(--room-panel); }
 .conference-tabs { display: flex; gap: 4px; margin: 12px; padding: 4px; border-radius: 11px; background: var(--room); }
