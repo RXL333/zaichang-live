@@ -29,6 +29,12 @@
   --room-text: #e8edf4;
   --room-muted: #8c9bb0;
 
+  --motion-instant: 120ms;
+  --motion-transition: 200ms;
+  --motion-entrance: 320ms;
+  --motion-exit: 140ms;
+  --motion-ease: cubic-bezier(.2,.7,.2,1);
+
   --font: "HarmonyOS Sans SC", "PingFang SC", "MiSans", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
 
   font-family: var(--font);
@@ -53,7 +59,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .inside-meeting { background: var(--room); color: var(--room-text); }
 .service-status { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 16px; padding:10px 20px; background:#fff3d6; color:#60460c; font-size:14px; }
 .service-status button, .service-status a { border:0; padding:0; background:none; color:inherit; text-decoration:underline; text-underline-offset:3px; font-weight:600; }
-.service-status-enter-active, .service-status-leave-active { transition:opacity .2s ease; }
+.service-status-enter-active { transition:opacity var(--motion-transition) var(--motion-ease); }
+.service-status-leave-active { transition:opacity var(--motion-exit) var(--motion-ease); }
 .service-status-enter-from, .service-status-leave-to { opacity:0; }
 @media (prefers-reduced-motion: reduce) { .service-status-enter-active, .service-status-leave-active { transition-duration:.12s; } }
 
@@ -67,7 +74,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border: 1px solid transparent; border-radius: 8px;
   background: transparent; color: var(--ink);
   font-size: 14px; font-weight: 600; white-space: nowrap;
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .1s ease;
+  transition: transform var(--motion-instant) var(--motion-ease);
 }
 .meeting-button:hover:not(:disabled), .button:hover:not(:disabled) { transform: none; }
 .meeting-button:active:not(:disabled), .button:active:not(:disabled) { transform: scale(.97); }
@@ -110,7 +117,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   width: 100%; padding: 11px 13px;
   border: 1px solid var(--line-strong); border-radius: 8px;
   background: var(--paper); color: var(--ink); font-size: 15px; font-weight: 400;
-  outline: none; transition: border-color .15s ease, box-shadow .15s ease;
+  outline: none;
 }
 .form-stack input::placeholder { color: #a3aeb4; }
 .form-stack input:focus, .form-stack select:focus, .form-stack textarea:focus {
@@ -217,7 +224,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .join-plate {
   position: relative; display: flex; align-items: stretch; max-width: 540px; margin-top: 36px;
   border: 1.5px solid var(--ink); border-radius: 14px; background: var(--paper); overflow: hidden;
-  transition: border-color .15s ease, box-shadow .15s ease;
 }
 .join-plate:focus-within { border-color: var(--presence); box-shadow: 0 0 0 4px var(--presence-wash); }
 .join-plate input {
@@ -229,18 +235,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .join-plate button {
   display: inline-flex; align-items: center; gap: 8px; padding: 0 26px;
   border: 0; background: var(--ink); color: #fff; font-size: 15px; font-weight: 700;
-  transition: background-color .2s ease;
 }
-.join-plate button svg { transition: transform .2s ease; }
+.join-plate button svg { transition: transform var(--motion-transition) var(--motion-ease); }
 .join-plate button:hover { background: var(--presence-dark); }
 .join-plate button:hover svg { transform: translateX(4px); }
 .join-plate.complete button { background: var(--presence); }
 .join-plate.complete button:hover { background: var(--presence-dark); }
 .join-progress {
   position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; pointer-events: none;
-  background: var(--presence-bright); transform: scaleX(0); transform-origin: left; transition: transform .25s ease;
+  background: var(--presence-bright); transform: scaleX(0); transform-origin: left; transition: transform var(--motion-transition) var(--motion-ease);
 }
-.join-plate.shake { animation: shake .4s ease; }
+.join-plate.shake { animation: shake var(--motion-entrance) var(--motion-ease); }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
 
 .hero-create { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 18px; font-size: 14px; color: var(--slate); }
@@ -251,27 +256,27 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   content: ""; position: absolute; z-index: -1; pointer-events: none;
   left: var(--gx, 70%); top: var(--gy, 30%); width: 320px; height: 320px; margin: -160px 0 0 -160px;
   border-radius: 50%; background: rgba(47, 203, 142, .38); filter: blur(64px);
-  opacity: 0; transition: opacity .4s ease, left .3s ease-out, top .3s ease-out;
+  opacity: 0; transition: opacity var(--motion-entrance) var(--motion-ease);
 }
 .hero-stage.is-hover::before { opacity: 1; }
 .hero-room {
   position: relative; padding: 14px; border-radius: 22px; background: var(--room);
   box-shadow: 0 36px 70px -30px rgba(14, 26, 43, .55);
-  transform: perspective(1100px) rotateX(var(--rx)) rotateY(var(--ry)); transition: transform .3s ease-out;
+  transform: perspective(1100px) rotateX(var(--rx)) rotateY(var(--ry)); transition: transform var(--motion-entrance) var(--motion-ease);
 }
 .hero-room-grid { display: grid; grid-template-columns: 1.7fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; aspect-ratio: 5 / 4; }
 .hero-room-tile {
   position: relative; display: grid; place-items: center; border-radius: 14px; background: var(--room-tile);
-  overflow: hidden; cursor: pointer; transition: background-color .2s ease;
+  overflow: hidden; cursor: pointer;
 }
 .hero-room-tile:hover { background: #1a2a41; }
 .hero-room-tile:first-child { grid-row: 1 / 3; }
 .hero-room-tile::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  box-shadow: inset 0 0 0 0 var(--presence-bright); transition: box-shadow .3s ease;
+  box-shadow: inset 0 0 0 0 var(--presence-bright);
 }
 .hero-room-tile.speaking::after { box-shadow: inset 0 0 0 2px var(--presence-bright); }
-.hero-room-tile .tile-avatar { width: 76px; height: 76px; font-size: 30px; transition: box-shadow .3s ease, background-color .3s ease; }
+.hero-room-tile .tile-avatar { width: 76px; height: 76px; font-size: 30px; }
 .hero-room-tile:not(:first-child) .tile-avatar { width: 48px; height: 48px; font-size: 20px; }
 .hero-room-tile.speaking .tile-avatar { background: #1c3a36; box-shadow: 0 0 0 7px rgba(47, 203, 142, .16); }
 .hero-room-tile .tile-name { left: 10px; bottom: 10px; font-size: 11px; padding: 5px 8px; }
@@ -286,21 +291,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .wave i:nth-child(2) { animation-delay: -.25s; }
 .wave i:nth-child(3) { animation-delay: -.5s; }
 .wave i:nth-child(4) { animation-delay: -.15s; }
+.motion-paused .wave i { animation-play-state: paused; }
 @keyframes wave { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
 
 .hero-chat {
   position: absolute; right: 28px; top: calc(100% - 12px); z-index: 3; display: flex; flex-direction: column; gap: 2px; max-width: 78%;
   padding: 10px 14px; border-radius: 12px; background: var(--paper); color: var(--ink);
   box-shadow: 0 14px 30px -10px rgba(14, 26, 43, .35); font-size: 13px; line-height: 1.5;
-  animation: chat-pop .45s cubic-bezier(.2, .8, .2, 1) both;
+  animation: chat-pop var(--motion-transition) var(--motion-ease) both;
 }
 .hero-chat b { color: var(--presence-dark); font-size: 12px; }
 @keyframes chat-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
 
 /* 首页进入动效：标题、说明、输入框、示意房间依次出现，只在页面载入时播放一次 */
-.rise { animation: rise .7s cubic-bezier(.2, .7, .2, 1) var(--d, 0s) both; }
+.rise { animation: rise var(--motion-entrance) var(--motion-ease) var(--d, 0s) both; }
 span.line.rise { display: block; }
-.rise-stage { animation: rise-stage .9s cubic-bezier(.2, .7, .2, 1) .25s both; }
+.rise-stage { animation: rise-stage var(--motion-entrance) var(--motion-ease) .25s both; }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @keyframes rise-stage { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
 
@@ -309,10 +315,10 @@ span.line.rise { display: block; }
 .feature { position: relative; padding-top: 22px; border-top: 1px solid var(--line-strong); }
 .feature::before {
   content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--presence);
-  transform: scaleX(0); transform-origin: left; transition: transform .45s cubic-bezier(.2, .7, .2, 1);
+  transform: scaleX(0); transform-origin: left; transition: transform var(--motion-transition) var(--motion-ease);
 }
 .feature:hover::before { transform: scaleX(1); }
-.feature > svg { color: var(--presence); transition: transform .3s ease; }
+.feature > svg { color: var(--presence); transition: transform var(--motion-transition) var(--motion-ease); }
 .feature:hover > svg { transform: translateY(-2px) scale(1.08); }
 .feature h3 { margin: 14px 0 6px; font-size: 16px; font-weight: 700; }
 .feature p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--slate); }
@@ -335,13 +341,12 @@ span.line.rise { display: block; }
 .meeting-list { border-top: 1px solid var(--line); }
 .meeting-list-row {
   position: relative; display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--line);
-  transition: background-color .2s ease, padding-left .25s ease;
 }
 .meeting-list-row::before {
   content: ""; position: absolute; left: 0; top: 24%; bottom: 24%; width: 3px; border-radius: 2px; background: var(--presence);
-  transform: scaleY(0); transition: transform .25s ease;
+  transform: scaleY(0); transition: transform var(--motion-transition) var(--motion-ease);
 }
-.meeting-row-actions .meeting-button svg { transition: transform .2s ease; }
+.meeting-row-actions .meeting-button svg { transition: transform var(--motion-transition) var(--motion-ease); }
 @media (hover: hover) {
   .meeting-list-row:hover { background: rgba(255, 255, 255, .6); padding-left: 16px; }
   .meeting-list-row:hover::before { transform: scaleY(1); }
@@ -461,7 +466,7 @@ span.line.rise { display: block; }
 .conference-tile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .conference-tile::after {
   content: ""; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
-  box-shadow: inset 0 0 0 0 var(--presence-bright); transition: box-shadow .18s ease;
+  box-shadow: inset 0 0 0 0 var(--presence-bright);
 }
 .conference-tile.speaking::after { box-shadow: inset 0 0 0 3px var(--presence-bright); }
 .conference-tile.screen-share-tile { grid-column: 1 / -1; grid-row: span 2; min-height: 300px; background: #070c14; }
@@ -501,7 +506,7 @@ span.line.rise { display: block; }
   display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 64px; padding: 0;
   border: 0; background: transparent; color: var(--room-muted); font-size: 12px;
 }
-.meeting-control svg { box-sizing: content-box; padding: 14px; border-radius: 50%; background: var(--room-raise); color: var(--room-text); transition: background-color .15s ease, color .15s ease; }
+.meeting-control svg { box-sizing: content-box; padding: 14px; border-radius: 50%; background: var(--room-raise); color: var(--room-text); }
 .meeting-control:hover:not(:disabled) svg { background: #26395a; }
 .meeting-control.enabled svg { background: #e8edf4; color: var(--ink); }
 .meeting-control.enabled:hover:not(:disabled) svg { background: #fff; }
@@ -641,9 +646,10 @@ span.line.rise { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .rise-stage, .hero-chat, .join-plate.shake, .wave i { animation: none !important; }
+  .rise, .rise-stage, .hero-chat { animation: reduced-fade var(--motion-instant) ease both !important; }
+  .join-plate.shake, .wave i, .loader { animation: none !important; }
   .hero-room { transform: none !important; }
   .hero-stage::before, .feature::before, .meeting-list-row, .meeting-list-row::before { transition: none; }
-  .loader { animation-duration: 1.6s; }
   .meeting-button, .button, .conference-tile::after, .meeting-control svg { transition: none; }
 }
+@keyframes reduced-fade { from { opacity:0; } to { opacity:1; } }

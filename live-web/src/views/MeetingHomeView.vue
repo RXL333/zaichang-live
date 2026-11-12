@@ -9,11 +9,12 @@ import { useServiceHealth } from '../stores/serviceHealth'
 import { requestError } from '../mediaErrors'
 import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { useMotion } from '../useMotion'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
 const removeTarget=ref(null),removing=ref(false)
-const reduceMotion=typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+const { reduced:reduceMotion }=useMotion(),pageHidden=ref(typeof document!=='undefined' && document.hidden)
 const people=[
   {name:'林夏',initial:'林',line:'我先分享一下这周的进展。'},
   {name:'周朗',initial:'周',line:'屏幕大家都能看到吗？'},
@@ -23,10 +24,10 @@ const speaker=ref(0),stage=ref(null),shake=ref(false),copiedId=ref('')
 const digits=computed(()=>number.value.replace(/\s/g,'').length)
 let requestId=0,toastTimer,cycle,copiedTimer
 function notify(message){toast.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.value='',3500)}
-function startCycle(){clearInterval(cycle);if(reduceMotion)return;cycle=setInterval(()=>{speaker.value=(speaker.value+1)%people.length},3000)}
+function startCycle(){clearInterval(cycle);cycle=null;pageHidden.value=document.hidden;if(reduceMotion.value || pageHidden.value)return;cycle=setInterval(()=>{speaker.value=(speaker.value+1)%people.length},3000)}
 function pickSpeaker(index){speaker.value=index;startCycle()}
 function tilt(event){
-  if(reduceMotion || event.pointerType!=='mouse' || !stage.value)return
+  if(reduceMotion.value || event.pointerType!=='mouse' || !stage.value)return
   const box=stage.value.getBoundingClientRect(),x=(event.clientX-box.left)/box.width,y=(event.clientY-box.top)/box.height
   const style=stage.value.style
   style.setProperty('--ry',`${((x-.5)*8).toFixed(2)}deg`);style.setProperty('--rx',`${((.5-y)*6).toFixed(2)}deg`)
@@ -47,8 +48,9 @@ async function load(){
   finally{if(current===requestId)loading.value=false}
 }
 watch(()=>[user.ready,user.current?.id,service.status],([ready,,status])=>{if(ready && status==='ready')load()},{immediate:true})
-onMounted(startCycle)
-onBeforeUnmount(()=>{clearInterval(cycle);clearTimeout(toastTimer);clearTimeout(copiedTimer)})
+watch(reduceMotion,()=>{if(reduceMotion.value)untilt();startCycle()})
+onMounted(()=>{document.addEventListener('visibilitychange',startCycle);startCycle()})
+onBeforeUnmount(()=>{document.removeEventListener('visibilitychange',startCycle);clearInterval(cycle);clearTimeout(toastTimer);clearTimeout(copiedTimer)})
 async function create(){
   if(service.status!=='ready'){
     notify('会议服务正在启动，请稍候')
@@ -99,7 +101,7 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
         <div class="rise" style="--d:.3s"><form class="join-plate" :class="{ complete: digits===9, shake }" @submit.prevent="join" @animationend="shake=false"><input :value="number" @input="onNumberInput" inputmode="numeric" maxlength="11" autocomplete="off" aria-label="会议号" placeholder="000 000 000"/><button>加入会议 <ArrowRight :size="18"/></button><span class="join-progress" :style="{ transform:`scaleX(${digits/9})` }" aria-hidden="true"></span></form></div>
         <div class="hero-create rise" style="--d:.4s"><span>没有会议号？</span><button class="meeting-button outline" @click="create"><Video :size="17"/> 创建会议</button></div>
       </div>
-      <div ref="stage" class="hero-stage rise-stage" aria-hidden="true" @pointermove="tilt" @pointerleave="untilt">
+      <div ref="stage" class="hero-stage rise-stage" :class="{ 'motion-paused':pageHidden }" aria-hidden="true" @pointermove="tilt" @pointerleave="untilt">
         <div class="hero-room">
           <span class="hero-room-count"><i></i>会议画面示意</span>
           <div class="hero-room-grid">
