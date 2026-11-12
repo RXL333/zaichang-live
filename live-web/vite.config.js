@@ -4,6 +4,13 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   base: process.env.VITE_PUBLIC_BASE || '/',
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) { if (id.replace(/\\/g,'/').includes('/node_modules/livekit-client/')) return 'livekit' },
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

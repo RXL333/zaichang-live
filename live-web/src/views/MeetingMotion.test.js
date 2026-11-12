@@ -7,6 +7,7 @@ import MeetingHomeView from './MeetingHomeView.vue'
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('../api', () => ({ api: vi.fn(), resetCsrf: vi.fn() }))
+vi.mock('../meetingRoutes', () => ({ preloadMeeting:vi.fn() }))
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); delete document.hidden })
 

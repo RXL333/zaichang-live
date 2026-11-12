@@ -11,6 +11,7 @@ import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useMotion } from '../useMotion'
 import { extractMeetingNumber, invitationText } from '../invitation'
+import { preloadMeeting } from '../meetingRoutes'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
@@ -23,6 +24,7 @@ const people=[
 ]
 const speaker=ref(0),stage=ref(null),shake=ref(false),copiedId=ref('')
 const digits=computed(()=>number.value.replace(/\s/g,'').length)
+watch(digits,count=>{if(count===9)preloadMeeting()})
 let requestId=0,toastTimer,cycle,copiedTimer
 function notify(message){toast.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.value='',3500)}
 function startCycle(){clearInterval(cycle);cycle=null;pageHidden.value=document.hidden;if(reduceMotion.value || pageHidden.value)return;cycle=setInterval(()=>{speaker.value=(speaker.value+1)%people.length},3000)}
