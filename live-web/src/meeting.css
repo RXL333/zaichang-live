@@ -508,6 +508,12 @@ span.line.rise { display: block; }
 .stage-pagination { position:absolute; z-index:4; left:50%; bottom:10px; display:flex; align-items:center; gap:8px; padding:3px 7px; border-radius:8px; background:var(--room-panel); color:var(--room-text); font-size:12px; transform:translateX(-50%); }
 .stage-pagination button { display:grid; place-items:center; width:26px; height:26px; border:0; border-radius:5px; background:none; color:inherit; }
 .stage-pagination button:disabled { opacity:.35; }
+.alone-card { position:absolute; z-index:4; top:50%; left:50%; display:grid; justify-items:center; gap:10px; min-width:230px; max-width:85%; padding:20px 24px; border:1px solid var(--room-line); border-radius:14px; background:#0f1a29f2; color:var(--room-text); text-align:center; transform:translate(-50%,-50%); }
+.alone-card span { color:var(--room-muted); font-size:13px; font-variant-numeric:tabular-nums; }
+.alone-card button { padding:8px 14px; border:0; border-radius:7px; background:var(--presence); color:#fff; font-size:13px; font-weight:600; }
+.alone-card-enter-active { transition:opacity var(--motion-transition) var(--motion-ease); }
+.alone-card-leave-active { transition:opacity var(--motion-exit) var(--motion-ease); }
+.alone-card-enter-from, .alone-card-leave-to { opacity:0; }
 @media (hover:none) { .tile-pin { opacity:1; } }
 
 .tile-avatar {

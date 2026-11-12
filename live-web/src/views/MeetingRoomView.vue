@@ -185,7 +185,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
       </header>
       <div class="conference-layout">
         <section class="conference-main">
-          <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState"/>
+          <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number" @invite="copy(inviteText,'邀请信息已复制')"/>
           <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>
           <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
           <div class="conference-toolbar">

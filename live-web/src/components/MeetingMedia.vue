@@ -4,8 +4,10 @@ import { RoomEvent, Track } from 'livekit-client'
 import { ChevronLeft, ChevronRight, Mic, MicOff, MonitorUp, Pin, PinOff, Volume2 } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
 import LogoMark from './LogoMark.vue'
+import { groupNumber } from '../format'
 
-const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String})
+const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
+const emit=defineEmits(['invite'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
 const view=ref('gallery'),pinned=ref(''),page=ref(1)
 let listeners=[],audioTracks=[],pressTimer
@@ -56,6 +58,7 @@ const visible=computed(()=>{
   return [primary.value,...others.slice((page.value-1)*8,page.value*8)].filter(Boolean)
 })
 const visibleKeys=computed(()=>new Set(visible.value.map(tile=>tile.key)))
+const alone=computed(()=>props.members.length===1 && props.members[0].userId===props.userId)
 const layout=computed(()=>{const n=visible.value.length;return n<=1?'layout-1':n===2?'layout-2':n<=4?'layout-4':n<=6?'layout-6':'layout-9'})
 function setView(value){view.value=value;page.value=1}
 function togglePin(tile){pinned.value=pinned.value===tile.key?'':tile.key;if(pinned.value){view.value='speaker';page.value=1}}
@@ -82,6 +85,7 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
       </div>
       <nav v-if="pageCount>1" class="stage-pagination" aria-label="画面分页"><button :disabled="page===1" aria-label="上一页画面" @click="page--"><ChevronLeft :size="15"/></button><span>{{ page }} / {{ pageCount }}</span><button :disabled="page===pageCount" aria-label="下一页画面" @click="page++"><ChevronRight :size="15"/></button></nav>
     </template>
+    <Transition name="alone-card"><div v-if="alone" class="alone-card"><strong>你是第一个到场的人</strong><span>会议号 {{ groupNumber(meetingNumber) }}</span><button @click="emit('invite')">复制邀请</button></div></Transition>
     <button v-if="!canPlay" class="unlock-audio" @click="startAudio"><Volume2 :size="16"/> 点击开启声音</button>
   </div>
 </template>
