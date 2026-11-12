@@ -398,6 +398,25 @@ span.line.rise { display: block; }
 .join-security { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--slate); }
 .join-device-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.6; color: var(--slate); }
 .join-device-note svg { margin-top: 3px; }
+.device-check { margin-top:22px; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.device-check summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px; cursor:pointer; font-size:14px; font-weight:700; list-style:none; }
+.device-check summary::after { content:'+'; color:var(--presence); font-size:20px; line-height:1; }
+.device-check[open] summary::after { content:'−'; }
+.device-check summary small { margin-left:auto; color:var(--slate); font-size:12px; font-weight:400; }
+.device-check-body { display:grid; gap:12px; padding:0 14px 16px; }
+.device-check-body > .meeting-button { justify-self:start; }
+.device-preview { display:grid; place-items:center; aspect-ratio:16/9; overflow:hidden; border-radius:9px; background:var(--room); color:var(--room-muted); }
+.device-preview video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+.device-preview span { display:flex; align-items:center; gap:8px; font-size:13px; }
+.device-select { display:grid; gap:5px; color:var(--ink); font-size:13px; font-weight:600; }
+.device-select select { width:100%; padding:9px 10px; border:1px solid var(--line-strong); border-radius:7px; background:var(--paper); color:var(--ink); }
+.device-meter { display:flex; align-items:center; gap:8px; color:var(--slate); font-size:12px; }
+.device-meter [role=meter] { flex:1; height:6px; overflow:hidden; border-radius:4px; background:var(--line); }
+.device-meter i { display:block; width:100%; height:100%; background:var(--presence); transform-origin:left; }
+.device-speaker-test { display:inline-flex; justify-self:start; align-items:center; gap:6px; padding:0; border:0; background:none; color:var(--presence); font-size:13px; }
+.device-optins { display:grid; gap:8px; font-size:13px; color:var(--ink); }
+.device-optins label { display:flex; align-items:center; gap:8px; }
+.device-message { color:var(--danger); font-size:13px; line-height:1.5; }
 .join-card-state { display: grid; justify-items: start; gap: 14px; font-size: 15px; color: var(--slate); }
 .join-card-state strong { color: var(--ink); }
 .join-card-state p { line-height: 1.7; }

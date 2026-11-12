@@ -14,14 +14,16 @@ import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import InviteQr from '../components/InviteQr.vue'
 import { invitationText, meetingUrl } from '../invitation'
+import { loadDevicePreferences, supportsSpeakerSelection, useJoinDevices } from '../devicePreferences'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
+const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
 const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),draft=ref(''),panel=ref('members'),menu=ref(''),renameTarget=ref(null),renameValue=ref('')
 const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(false),obsDialog=ref(false),obsInfo=ref(null),obsLoading=ref(false),showKey=ref(false),chatList=ref(null),mediaRevision=ref(0)
 const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 const inviteDialog=ref(false)
-let socket,leaving=false,mediaGeneration=0,noticeTimer
+let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
 const connectionText=computed(()=>({connected:'连接正常',connecting:'正在连接',reconnecting:'正在重连',expired:'请重新加入',closed:'已断开'})[connection.value]||'连接中')
@@ -65,7 +67,11 @@ async function connectMedia(){
   try{
     const credentials=await api(`/api/meetings/${number}/media-token`,{method:'POST'})
     if(generation!==mediaGeneration)return
-    const next=new Room({adaptiveStream:true,dynacast:true})
+    const next=new Room({adaptiveStream:true,dynacast:true,
+      ...(deviceDefaults.microphoneId ? {audioCaptureDefaults:{deviceId:deviceDefaults.microphoneId}} : {}),
+      ...(deviceDefaults.cameraId ? {videoCaptureDefaults:{deviceId:deviceDefaults.cameraId}} : {}),
+      ...(deviceDefaults.speakerId && supportsSpeakerSelection() ? {audioOutput:{deviceId:deviceDefaults.speakerId}} : {}),
+    })
     next.on(RoomEvent.Reconnecting,()=>{if(generation===mediaGeneration)mediaState.value='reconnecting'})
     next.on(RoomEvent.Reconnected,()=>{if(generation===mediaGeneration){mediaState.value='connected';mediaError.value=''}})
     next.on(RoomEvent.Disconnected,()=>{if(generation===mediaGeneration && !leaving){mediaState.value='error';mediaError.value='音视频连接已断开，请重新连接。';camera.value=false;microphone.value=false;sharing.value=false}})
@@ -73,6 +79,24 @@ async function connectMedia(){
     for(const event of [RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished])if(event)next.on(event,sync)
     room.value=next;await next.connect(credentials.url,credentials.token)
     if(generation!==mediaGeneration){await next.disconnect();return}mediaState.value='connected';sync()
+    if(initialMedia){
+      const selected=initialMedia;initialMedia=null;deviceBusy.value=true
+      try{
+        for(const [enabled,kind] of [[selected.microphoneOn,'mic'],[selected.cameraOn,'camera']]){
+          if(!enabled || generation!==mediaGeneration || leaving)continue
+          try{
+            if(kind==='mic')await next.localParticipant.setMicrophoneEnabled(true)
+            else await next.localParticipant.setCameraEnabled(true)
+            if(generation!==mediaGeneration || leaving){
+              if(kind==='mic')await next.localParticipant.setMicrophoneEnabled(false)
+              else await next.localParticipant.setCameraEnabled(false)
+              await next.disconnect();return
+            }
+          }catch(error){const message=explainMediaError(error,{operation:kind});if(message)flash(message)}
+        }
+        if(generation===mediaGeneration)sync()
+      }finally{if(generation===mediaGeneration)deviceBusy.value=false}
+    }
   }catch(e){if(generation===mediaGeneration){const failed=room.value;room.value=null;await failed?.disconnect();mediaState.value='error';mediaError.value=explainMediaError(e,{operation:'connect'})}}
 }
 async function load(){

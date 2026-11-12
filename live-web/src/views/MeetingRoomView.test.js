@@ -4,9 +4,10 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { api } from '../api'
 import { useUser } from '../stores/user'
+import { useJoinDevices } from '../devicePreferences'
 import MeetingRoomView from './MeetingRoomView.vue'
 
-const socketMock = vi.hoisted(() => ({ onEvent: null, send: vi.fn(() => true), close: vi.fn() }))
+const socketMock = vi.hoisted(() => ({ onEvent: null, send: vi.fn(() => true), close: vi.fn(), microphone:vi.fn(async()=>{}), camera:vi.fn(async()=>{}) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { number: '123456789' } }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('../api', () => ({ api: vi.fn(), resetCsrf: vi.fn() }))
 vi.mock('../meetingSocket', () => ({ createMeetingSocket: ({ onState, onEvent }) => {
@@ -14,7 +15,7 @@ vi.mock('../meetingSocket', () => ({ createMeetingSocket: ({ onState, onEvent })
 } }))
 vi.mock('livekit-client', () => ({
   Room: class {
-    constructor() { this.localParticipant = { isCameraEnabled: false, isMicrophoneEnabled: false, isScreenShareEnabled: false }; this.remoteParticipants = new Map() }
+    constructor() { this.localParticipant = { isCameraEnabled: false, isMicrophoneEnabled: false, isScreenShareEnabled: false, setMicrophoneEnabled:socketMock.microphone, setCameraEnabled:socketMock.camera }; this.remoteParticipants = new Map() }
     on() {} async connect() {} async disconnect() {}
   },
   RoomEvent: {}, Track: { Kind: { Audio: 'audio' }, Source: { Microphone: 'microphone' } },
@@ -42,5 +43,15 @@ it('keeps a rate-limited chat message visible with a clear failed state', async 
   await wrapper.vm.$nextTick()
   expect(wrapper.text()).toContain('重要消息')
   expect(wrapper.text()).toContain('未发送，请稍后复制重试')
+  expect(socketMock.microphone).not.toHaveBeenCalled()
+  expect(socketMock.camera).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('only enables a device after an explicit opt-in on the join page', async () => {
+  useJoinDevices().prepare('123456789',{microphoneOn:true,cameraOn:false})
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(socketMock.microphone).toHaveBeenCalledWith(true))
+  expect(socketMock.camera).not.toHaveBeenCalled()
   wrapper.unmount()
 })
