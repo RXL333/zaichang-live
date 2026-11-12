@@ -29,7 +29,7 @@ const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 let touchStartY=null
-let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection
+let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
 const connectionText=computed(()=>({connected:'连接正常',connecting:'正在连接',reconnecting:'正在重连',expired:'请重新加入',closed:'已断开'})[connection.value]||'连接中')
@@ -66,7 +66,7 @@ async function history(){try{const rows=await api(`/api/meetings/${number}/messa
 function handleEvent(event){
   if(event.type==='MEMBERS')members.value=event.members||[]
   if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
-  if(event.type==='MUTED'){microphone.value=false;flash(event.message)}
+  if(event.type==='MUTED'){hostMuteRevision++;microphone.value=false;if(initialMedia)initialMedia.microphoneOn=false;if(restoreMedia)restoreMedia.microphoneOn=false;flash(event.message)}
   if(event.type==='NOTICE')flash(event.message)
   if(event.type==='ERROR'){
     if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed)failed.failed=true}
@@ -85,11 +85,13 @@ async function connectMedia(){
   try{
     const credentials=await api(`/api/meetings/${number}/media-token`,{method:'POST'})
     if(generation!==mediaGeneration)return
+    const selectedDevices=mediaDevices.selected
     const next=new Room({adaptiveStream:true,dynacast:true,
-      ...(deviceDefaults.microphoneId ? {audioCaptureDefaults:{deviceId:deviceDefaults.microphoneId}} : {}),
-      ...(deviceDefaults.cameraId ? {videoCaptureDefaults:{deviceId:deviceDefaults.cameraId}} : {}),
-      ...(deviceDefaults.speakerId && supportsSpeakerSelection() ? {audioOutput:{deviceId:deviceDefaults.speakerId}} : {}),
+      ...(selectedDevices.microphoneId ? {audioCaptureDefaults:{deviceId:selectedDevices.microphoneId}} : {}),
+      ...(selectedDevices.cameraId ? {videoCaptureDefaults:{deviceId:selectedDevices.cameraId}} : {}),
+      ...(selectedDevices.speakerId && supportsSpeakerSelection() ? {audioOutput:{deviceId:selectedDevices.speakerId}} : {}),
     })
+    let hasConnected=false
     next.on(RoomEvent.Reconnecting,()=>{if(generation===mediaGeneration)mediaState.value='reconnecting'})
     const sync=()=>{camera.value=next.localParticipant.isCameraEnabled;microphone.value=next.localParticipant.isMicrophoneEnabled;sharing.value=next.localParticipant.isScreenShareEnabled;mediaRevision.value++}
     const updateQuality=(quality,participant)=>{
@@ -99,20 +101,26 @@ async function connectMedia(){
       qualityReduced.value=adjustVideoQuality(next,poor) && poor
     }
     next.on(RoomEvent.Reconnected,()=>{if(generation===mediaGeneration){mediaState.value='connected';mediaError.value='';sync();updateQuality(next.localParticipant.connectionQuality,next.localParticipant)}})
-    next.on(RoomEvent.Disconnected,()=>{if(generation===mediaGeneration && !leaving){mediaState.value='error';mediaError.value='音视频连接已断开，请重新连接。';camera.value=false;microphone.value=false;sharing.value=false;networkQuality.value='unknown';qualityReduced.value=false}})
+    next.on(RoomEvent.Disconnected,()=>{if(generation===mediaGeneration && !leaving){
+      if(hasConnected)restoreMedia={microphoneOn:microphone.value,cameraOn:camera.value}
+      mediaState.value='error';mediaError.value=sharing.value?'音视频连接已断开，重连后请重新共享屏幕。':'音视频连接已断开，请重新连接。'
+      camera.value=false;microphone.value=false;sharing.value=false;networkQuality.value='unknown';qualityReduced.value=false
+    }})
     next.on(RoomEvent.ConnectionQualityChanged,updateQuality)
     next.on(RoomEvent.TrackSubscribed,()=>{if(['poor','lost'].includes(networkQuality.value))qualityReduced.value=adjustVideoQuality(next,true) || qualityReduced.value})
     for(const event of [RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished])if(event)next.on(event,sync)
     room.value=next;await next.connect(credentials.url,credentials.token)
-    if(generation!==mediaGeneration){await next.disconnect();return}mediaState.value='connected';sync();updateQuality(next.localParticipant.connectionQuality,next.localParticipant)
-    if(initialMedia){
-      const selected=initialMedia;initialMedia=null;deviceBusy.value=true
+    if(generation!==mediaGeneration){await next.disconnect();return}hasConnected=true;mediaState.value='connected';sync();updateQuality(next.localParticipant.connectionQuality,next.localParticipant)
+    if(initialMedia || restoreMedia){
+      const selected=initialMedia || restoreMedia;initialMedia=null;restoreMedia=null;deviceBusy.value=true
       try{
         for(const [enabled,kind] of [[selected.microphoneOn,'mic'],[selected.cameraOn,'camera']]){
           if(!enabled || generation!==mediaGeneration || leaving)continue
           try{
+            const muteRevision=hostMuteRevision
             if(kind==='mic')await next.localParticipant.setMicrophoneEnabled(true)
             else await next.localParticipant.setCameraEnabled(true)
+            if(kind==='mic' && muteRevision!==hostMuteRevision)await next.localParticipant.setMicrophoneEnabled(false)
             if(generation!==mediaGeneration || leaving){
               if(kind==='mic')await next.localParticipant.setMicrophoneEnabled(false)
               else await next.localParticipant.setCameraEnabled(false)
@@ -137,12 +145,27 @@ async function load(){
 }
 async function device(kind){
   if(!room.value || mediaState.value!=='connected'){flash('请先连接音视频');return}
+  const target=room.value,generation=mediaGeneration
+  const stale=()=>generation!==mediaGeneration || leaving || room.value!==target
   deviceBusy.value=true
   try{
-    if(kind==='mic'){await room.value.localParticipant.setMicrophoneEnabled(!microphone.value);microphone.value=room.value.localParticipant.isMicrophoneEnabled}
-    if(kind==='camera'){await room.value.localParticipant.setCameraEnabled(!camera.value);camera.value=room.value.localParticipant.isCameraEnabled}
-    if(kind==='screen'){await room.value.localParticipant.setScreenShareEnabled(!sharing.value,{audio:false});sharing.value=room.value.localParticipant.isScreenShareEnabled}
-  }catch(e){const message=explainMediaError(e,{operation:kind});if(message)flash(message)}
+    if(kind==='mic'){
+      const enabled=!microphone.value,muteRevision=hostMuteRevision
+      await target.localParticipant.setMicrophoneEnabled(enabled)
+      if(enabled && (stale() || muteRevision!==hostMuteRevision))await target.localParticipant.setMicrophoneEnabled(false)
+      if(!stale())microphone.value=target.localParticipant.isMicrophoneEnabled
+    }
+    if(kind==='camera'){
+      const enabled=!camera.value;await target.localParticipant.setCameraEnabled(enabled)
+      if(enabled && stale())await target.localParticipant.setCameraEnabled(false)
+      if(!stale())camera.value=target.localParticipant.isCameraEnabled
+    }
+    if(kind==='screen'){
+      const enabled=!sharing.value;await target.localParticipant.setScreenShareEnabled(enabled,{audio:false})
+      if(enabled && stale())await target.localParticipant.setScreenShareEnabled(false)
+      if(!stale())sharing.value=target.localParticipant.isScreenShareEnabled
+    }
+  }catch(e){if(!stale()){const message=explainMediaError(e,{operation:kind});if(message)flash(message)}}
   finally{deviceBusy.value=false}
 }
 function sendChat(){

@@ -7,7 +7,7 @@ import { useUser } from '../stores/user'
 import { useJoinDevices } from '../devicePreferences'
 import MeetingRoomView from './MeetingRoomView.vue'
 
-const socketMock = vi.hoisted(() => ({ onEvent: null, onState:null, send: vi.fn(() => true), close: vi.fn(), connect:vi.fn(async()=>{}), microphone:vi.fn(async()=>{}), camera:vi.fn(async()=>{}) }))
+const socketMock = vi.hoisted(() => ({ onEvent: null, onState:null, rooms:[], send: vi.fn(() => true), close: vi.fn(), connect:vi.fn(async()=>{}), microphone:vi.fn(async()=>{}), camera:vi.fn(async()=>{}) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { number: '123456789' } }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('../api', () => ({ api: vi.fn(), resetCsrf: vi.fn() }))
 vi.mock('../meetingSocket', () => ({ createMeetingSocket: ({ onState, onEvent }) => {
@@ -15,14 +15,22 @@ vi.mock('../meetingSocket', () => ({ createMeetingSocket: ({ onState, onEvent })
 } }))
 vi.mock('livekit-client', () => ({
   Room: class {
-    constructor() { this.localParticipant = { isCameraEnabled: false, isMicrophoneEnabled: false, isScreenShareEnabled: false, setMicrophoneEnabled:socketMock.microphone, setCameraEnabled:socketMock.camera }; this.remoteParticipants = new Map() }
-    on() {} connect() { return socketMock.connect() } async disconnect() {}
+    constructor() {
+      this.handlers=new Map();this.remoteParticipants = new Map()
+      this.localParticipant = { isCameraEnabled:false,isMicrophoneEnabled:false,isScreenShareEnabled:false,trackPublications:new Map(),
+        setMicrophoneEnabled:async value=>{await socketMock.microphone(value);this.localParticipant.isMicrophoneEnabled=value},
+        setCameraEnabled:async value=>{await socketMock.camera(value);this.localParticipant.isCameraEnabled=value} }
+      socketMock.rooms.push(this)
+    }
+    on(event,fn) { const callbacks=this.handlers.get(event) || [];callbacks.push(fn);this.handlers.set(event,callbacks) }
+    emit(event,...args) { for(const fn of this.handlers.get(event) || [])fn(...args) }
+    connect() { return socketMock.connect() } async disconnect() {}
   },
-  RoomEvent: {}, Track: { Kind: { Audio: 'audio' }, Source: { Microphone: 'microphone' } },
+  RoomEvent: { Reconnecting:'reconnecting',Reconnected:'reconnected',Disconnected:'disconnected',ConnectionQualityChanged:'quality',TrackSubscribed:'subscribed' }, Track: { Kind: { Audio: 'audio' }, Source: { Microphone: 'microphone' } },
 }))
 
 beforeEach(() => {
-  setActivePinia(createPinia()); vi.clearAllMocks();socketMock.connect.mockResolvedValue()
+  setActivePinia(createPinia()); vi.clearAllMocks();socketMock.rooms.length=0;socketMock.connect.mockResolvedValue();socketMock.microphone.mockResolvedValue();socketMock.camera.mockResolvedValue()
   const user = useUser(); user.current = { id: 'user-1', nickname: '小林' }; user.ready = true
   api.mockImplementation(path => {
     if (path === '/api/auth/me') return Promise.resolve({ authenticated: true, user: { id: 'user-1', nickname: '小林' } })
@@ -95,5 +103,42 @@ it('opens and closes the mobile interaction drawer and explains unsupported shar
   expect(wrapper.get('#meeting-side').classes()).not.toContain('mobile-open')
   await wrapper.vm.$nextTick()
   expect(document.activeElement).toBe(wrapper.get('[aria-label="更多会议功能"]').element)
+  wrapper.unmount()
+})
+
+it('restores a previously enabled microphone after a full media reconnect',async()=>{
+  useJoinDevices().prepare('123456789',{microphoneOn:true,cameraOn:false})
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(socketMock.microphone).toHaveBeenCalledTimes(1))
+  await vi.waitFor(()=>expect(wrapper.find('[aria-label="关闭麦克风"]').exists()).toBe(true))
+  socketMock.rooms[0].emit('disconnected');await wrapper.vm.$nextTick()
+  await wrapper.findAll('button').find(button=>button.text()==='重新连接').trigger('click')
+  await vi.waitFor(()=>expect(socketMock.microphone).toHaveBeenCalledTimes(2))
+  expect(socketMock.microphone).toHaveBeenLastCalledWith(true)
+  wrapper.unmount()
+})
+
+it('does not override a host mute received while a microphone is starting',async()=>{
+  let finishMicrophone
+  socketMock.microphone.mockImplementation(value=>value ? new Promise(resolve=>{finishMicrophone=resolve}) : Promise.resolve())
+  useJoinDevices().prepare('123456789',{microphoneOn:true,cameraOn:false})
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(socketMock.microphone).toHaveBeenCalledWith(true))
+  socketMock.onEvent({type:'MUTED',message:'主持人已将你静音'})
+  finishMicrophone();await flushPromises()
+  expect(socketMock.microphone).toHaveBeenLastCalledWith(false)
+  wrapper.unmount()
+})
+
+it('turns off a camera request that finishes after removal from the meeting',async()=>{
+  let finishCamera
+  socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.find('[aria-label="开启摄像头"]').exists()).toBe(true))
+  await wrapper.get('[aria-label="开启摄像头"]').trigger('click')
+  await vi.waitFor(()=>expect(socketMock.camera).toHaveBeenCalledWith(true))
+  socketMock.onEvent({type:'KICKED',message:'主持人已将你移出会议'})
+  finishCamera();await flushPromises()
+  expect(socketMock.camera).toHaveBeenLastCalledWith(false)
   wrapper.unmount()
 })
