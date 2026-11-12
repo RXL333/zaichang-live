@@ -420,6 +420,9 @@ span.line.rise { display: block; }
 .join-card-state { display: grid; justify-items: start; gap: 14px; font-size: 15px; color: var(--slate); }
 .join-card-state strong { color: var(--ink); }
 .join-card-state p { line-height: 1.7; }
+.join-state-logo { width:44px; height:44px; border-radius:12px; background:var(--ink); color:#c8d4d0; }
+.join-state-logo svg { width:30px; height:30px; }
+.join-state-ended { --presence-bright:#738079; }
 .join-notice { margin-top: 20px; padding: 14px 16px; border-radius: 10px; background: #f3efe6; color: #7a5b2c; font-size: 14px; }
 
 /* --------------------------------------------------------------------------
