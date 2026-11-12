@@ -1,12 +1,9 @@
 name: Publish GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'live-web/**'
-      - '.github/workflows/pages.yml'
-  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 permissions:
   contents: read
@@ -15,22 +12,38 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Check that the tested commit is still current
+        id: revision
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$TESTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "A newer main commit exists; skipping this deployment."
+          fi
       - uses: actions/setup-node@v4
+        if: steps.revision.outputs.current == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: live-web/package-lock.json
       - name: Build website
+        if: steps.revision.outputs.current == 'true'
         working-directory: live-web
         env:
           VITE_PUBLIC_BASE: /zaichang-live/
@@ -40,8 +53,11 @@ jobs:
           npm ci
           npm run build
       - uses: actions/configure-pages@v5
+        if: steps.revision.outputs.current == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.revision.outputs.current == 'true'
         with:
           path: live-web/dist
       - id: deployment
+        if: steps.revision.outputs.current == 'true'
         uses: actions/deploy-pages@v4

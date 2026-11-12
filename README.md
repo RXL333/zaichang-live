@@ -1,5 +1,7 @@
 # 在场会议
 
+[![CI](https://github.com/RXL333/zaichang-live/actions/workflows/ci.yml/badge.svg)](https://github.com/RXL333/zaichang-live/actions/workflows/ci.yml)
+
 一个基于 Vue 3、Spring Boot、WebSocket 和 LiveKit 的在线会议课程设计。会议创建者可以管理会议，参会成员可以使用摄像头、麦克风、屏幕共享、会议聊天和 OBS 推流。
 
 线上入口：[在场会议](https://rxl333.github.io/zaichang-live/)。前端由 GitHub Pages 提供，后端运行在 InstaBox，账号和会议数据保存在 Neon PostgreSQL，音视频由 LiveKit Cloud 提供。InstaBox 后端也包含一份前端构建产物。
