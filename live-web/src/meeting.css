@@ -492,6 +492,23 @@ span.line.rise { display: block; }
 .conference-tile.speaking::after { box-shadow: inset 0 0 0 3px var(--presence-bright); }
 .conference-tile.screen-share-tile { grid-column: 1 / -1; grid-row: span 2; min-height: 300px; background: #070c14; }
 .conference-tile.screen-share-tile video { object-fit: contain; }
+.stage-views { position:absolute; top:12px; right:12px; z-index:4; display:flex; gap:2px; padding:3px; border:1px solid var(--room-line); border-radius:9px; background:var(--room-panel); }
+.stage-views button { padding:6px 10px; border:0; border-radius:6px; background:none; color:var(--room-muted); font-size:12px; }
+.stage-views button.active { background:var(--room-raise); color:var(--room-text); }
+.meeting-stage .conference-tiles { padding-top:52px; padding-bottom:48px; }
+.meeting-stage .conference-tiles.gallery-layout .screen-share-tile { grid-column:auto; grid-row:auto; min-height:180px; }
+.meeting-stage .conference-tiles.speaker-layout { grid-template-columns:repeat(var(--thumbnail-count),minmax(0,1fr)); grid-template-rows:minmax(0,1fr) minmax(65px,22%); grid-auto-rows:0; overflow:hidden; }
+.meeting-stage .conference-tiles.speaker-layout.single-speaker { grid-template-rows:minmax(0,1fr); }
+.meeting-stage .speaker-layout .conference-tile { grid-column:auto; grid-row:2; min-height:0; }
+.meeting-stage .speaker-layout .conference-tile.tile-primary { grid-column:1 / -1; grid-row:1; min-height:0; }
+.meeting-stage .speaker-layout .conference-tile:not(.tile-primary) .tile-avatar { width:40px; height:40px; font-size:16px; }
+.meeting-stage .speaker-layout .conference-tile:not(.tile-primary) .tile-name { max-width:100%; overflow:hidden; font-size:10px; }
+.tile-pin { position:absolute; z-index:4; top:9px; right:9px; display:grid; place-items:center; width:30px; height:30px; border:0; border-radius:7px; background:#0a111cdd; color:#fff; opacity:0; transition:opacity var(--motion-instant) var(--motion-ease); }
+.conference-tile:hover .tile-pin, .conference-tile:focus-within .tile-pin, .tile-pin[aria-pressed=true] { opacity:1; }
+.stage-pagination { position:absolute; z-index:4; left:50%; bottom:10px; display:flex; align-items:center; gap:8px; padding:3px 7px; border-radius:8px; background:var(--room-panel); color:var(--room-text); font-size:12px; transform:translateX(-50%); }
+.stage-pagination button { display:grid; place-items:center; width:26px; height:26px; border:0; border-radius:5px; background:none; color:inherit; }
+.stage-pagination button:disabled { opacity:.35; }
+@media (hover:none) { .tile-pin { opacity:1; } }
 
 .tile-avatar {
   display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%;
@@ -499,7 +516,7 @@ span.line.rise { display: block; }
 }
 .tile-name, .tile-screen-label {
   position: absolute; left: 12px; bottom: 12px; z-index: 3; display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 8px; background: rgba(8, 13, 22, .74); backdrop-filter: blur(6px);
+  padding: 6px 10px; border-radius: 8px; background: rgba(8, 13, 22, .88);
   color: var(--room-text); font-size: 12px; font-weight: 600;
 }
 .tile-screen-label { top: 12px; bottom: auto; }
