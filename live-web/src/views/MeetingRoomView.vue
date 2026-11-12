@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowLeft, ArrowRight, Check, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
@@ -10,11 +10,14 @@ import MeetingMedia from '../components/MeetingMedia.vue'
 import LogoMark from '../components/LogoMark.vue'
 import { groupNumber } from '../format'
 import { mediaError as explainMediaError, requestError } from '../mediaErrors'
+import ModalDialog from '../components/ModalDialog.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
 const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),draft=ref(''),panel=ref('members'),menu=ref(''),renameTarget=ref(null),renameValue=ref('')
 const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(false),obsDialog=ref(false),obsInfo=ref(null),obsLoading=ref(false),showKey=ref(false),chatList=ref(null),mediaRevision=ref(0)
+const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 let socket,leaving=false,mediaGeneration=0,noticeTimer
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
@@ -92,7 +95,10 @@ function sendChat(){
   pending.value.push({client_id:clientId,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now()})
   if(socket?.send({type:'CHAT',clientId,content}))draft.value=''
 }
-function manage(type,target){menu.value='';if(type==='KICK' && !window.confirm(`确定将“${target.nickname}”移出会议？`))return;if(!socket?.send({type,userId:target.userId}))flash('连接已断开，请稍后重试')}
+function manage(type,target){
+  if(type==='KICK'){confirmTarget.value=target;confirmKind.value='kick';return}
+  menu.value='';if(!socket?.send({type,userId:target.userId}))flash('连接已断开，请稍后重试')
+}
 function openRename(member){menu.value='';renameTarget.value=member;renameValue.value=member.nickname}
 function rename(){const value=renameValue.value.trim();if(!value)return;if(!socket?.send({type:'RENAME',userId:renameTarget.value.userId,nickname:value}))flash('连接已断开，请稍后重试');renameTarget.value=null}
 async function createObs(){obsLoading.value=true;try{obsInfo.value=await api(`/api/meetings/${number}/obs`,{method:'POST'});showKey.value=false}catch(e){flash(requestError(e))}finally{obsLoading.value=false}}
@@ -102,7 +108,24 @@ async function leave(){
   try{await api(`/api/meetings/${number}/obs`,{method:'DELETE'})}catch{flash('OBS 推流未能确认关闭，请在 OBS 中停止推流。')}
   await room.value?.disconnect();room.value=null;router.push('/')
 }
-async function endMeeting(){if(!window.confirm('确定结束本次会议？所有成员将离开会议。'))return;try{await api(`/api/meetings/${number}/end`,{method:'POST'});leaving=true;socket?.close();await room.value?.disconnect();router.push('/')}catch(e){flash(requestError(e))}}
+async function endMeeting(){try{await api(`/api/meetings/${number}/end`,{method:'POST'});leaving=true;socket?.close();await room.value?.disconnect();router.push('/')}catch(e){flash(requestError(e))}}
+const confirmation=computed(()=>({
+  leave:{title:'离开会议',description:'确定离开当前会议？你可以使用会议号重新加入。',action:'离开会议'},
+  end:{title:'结束会议',description:'确定结束本次会议？所有成员将离开会议。',action:'结束会议'},
+  kick:{title:'移出成员',description:`确定将“${confirmTarget.value?.nickname || ''}”移出会议？`,action:'移出成员'},
+})[confirmKind.value] || {})
+async function confirmAction(){
+  if(confirmBusy.value)return
+  confirmBusy.value=true
+  try{
+    if(confirmKind.value==='leave')await leave()
+    else if(confirmKind.value==='end')await endMeeting()
+    else if(confirmKind.value==='kick' && confirmTarget.value){
+      if(!socket?.send({type:'KICK',userId:confirmTarget.value.userId}))flash('连接已断开，请稍后重试')
+      menu.value=''
+    }
+  }finally{confirmKind.value='';confirmTarget.value=null;confirmBusy.value=false}
+}
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
 onMounted(load)
 onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);socket?.close();room.value?.disconnect()})
@@ -114,14 +137,14 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
     <template v-else-if="meeting">
       <header class="conference-header">
         <div class="conference-title">
-          <button class="conference-back" aria-label="离开会议并返回首页" @click="leave"><ArrowLeft :size="19"/></button>
+          <button class="conference-back" aria-label="离开会议并返回首页" @click="confirmKind='leave'"><ArrowLeft :size="19"/></button>
           <LogoMark />
           <div><strong>{{ meeting.title }}</strong><small>{{ groupNumber(number) }}</small></div>
         </div>
         <div class="conference-header-right">
           <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
           <button class="meeting-button conference-share" aria-label="邀请参会者" @click="copy(inviteUrl(),'邀请链接已复制')"><Copy :size="15"/> <span>邀请</span></button>
-          <button v-if="isHost" class="end-meeting" @click="endMeeting">结束会议</button>
+          <button v-if="isHost" class="end-meeting" @click="confirmKind='end'">结束会议</button>
           <button class="user-initial" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
         </div>
       </header>
@@ -136,7 +159,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
               <button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button>
               <button class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <button class="meeting-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
-              <button class="meeting-control leave-control" @click="leave"><LogOut :size="20"/><span>离开</span></button>
+              <button class="meeting-control leave-control" @click="confirmKind='leave'"><LogOut :size="20"/><span>离开</span></button>
             </div>
           </div>
         </section>
@@ -167,14 +190,13 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           </template>
         </aside>
       </div>
-      <Teleport to="body">
-        <div v-if="renameTarget" class="modal-backdrop" @click.self="renameTarget=null" @keydown.esc="renameTarget=null">
-          <section class="modal meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><button class="icon-button modal-close" aria-label="关闭" @click="renameTarget=null"><X :size="20"/></button><h2 id="rename-title">修改会议昵称</h2><p class="muted">此昵称只在当前会议中显示。</p><form class="form-stack" @submit.prevent="rename"><label>会议昵称<input v-model.trim="renameValue" maxlength="40" required/></label><button class="meeting-button primary full">保存昵称 <Check :size="17"/></button></form></section>
-        </div>
-        <div v-if="obsDialog" class="modal-backdrop" @click.self="obsDialog=false" @keydown.esc="obsDialog=false">
-          <section class="modal meeting-dialog obs-dialog" role="dialog" aria-modal="true" aria-labelledby="obs-title"><button class="icon-button modal-close" aria-label="关闭" @click="obsDialog=false"><X :size="20"/></button><h2 id="obs-title">通过 OBS 推流</h2><p class="muted">在 OBS 的“设置 → 推流”中选择 WHIP，填入下面的信息。OBS 与浏览器请勿同时采集同一个麦克风，以免产生回声。</p><template v-if="obsInfo"><div class="obs-fields"><label>服务器地址<div><input readonly :value="obsInfo.url"/><button @click="copy(obsInfo.url)" aria-label="复制服务器地址"><Copy :size="16"/></button></div></label><label>Bearer Token<div><input readonly :type="showKey?'text':'password'" :value="obsInfo.streamKey"/><button @click="showKey=!showKey">{{ showKey ? '隐藏' : '显示' }}</button><button @click="copy(obsInfo.streamKey)" aria-label="复制 Token"><Copy :size="16"/></button></div></label></div><p class="obs-note">请勿向他人泄露 Token。重新生成会使原推流地址失效。</p><div class="obs-actions"><button class="meeting-button outline" :disabled="obsLoading" @click="stopObs">停止推流</button><button class="meeting-button primary" :disabled="obsLoading" @click="createObs">重新生成</button></div></template><button v-else class="meeting-button primary full obs-create" :disabled="obsLoading" @click="createObs">{{ obsLoading ? '正在生成…' : '生成推流信息' }} <ArrowRight :size="17"/></button></section>
-        </div>
-      </Teleport>
+      <ModalDialog :open="!!renameTarget" labelledby="rename-title" dialog-class="meeting-dialog" @close="renameTarget=null">
+        <h2 id="rename-title">修改会议昵称</h2><p class="muted">此昵称只在当前会议中显示。</p><form class="form-stack" @submit.prevent="rename"><label>会议昵称<input v-model.trim="renameValue" maxlength="40" required/></label><button class="meeting-button primary full">保存昵称 <Check :size="17"/></button></form>
+      </ModalDialog>
+      <ModalDialog :open="obsDialog" labelledby="obs-title" dialog-class="meeting-dialog obs-dialog" @close="obsDialog=false">
+        <h2 id="obs-title">通过 OBS 推流</h2><p class="muted">在 OBS 的“设置 → 推流”中选择 WHIP，填入下面的信息。OBS 与浏览器请勿同时采集同一个麦克风，以免产生回声。</p><template v-if="obsInfo"><div class="obs-fields"><label>服务器地址<div><input readonly :value="obsInfo.url"/><button @click="copy(obsInfo.url)" aria-label="复制服务器地址"><Copy :size="16"/></button></div></label><label>Bearer Token<div><input readonly :type="showKey?'text':'password'" :value="obsInfo.streamKey"/><button @click="showKey=!showKey">{{ showKey ? '隐藏' : '显示' }}</button><button @click="copy(obsInfo.streamKey)" aria-label="复制 Token"><Copy :size="16"/></button></div></label></div><p class="obs-note">请勿向他人泄露 Token。重新生成会使原推流地址失效。</p><div class="obs-actions"><button class="meeting-button outline" :disabled="obsLoading" @click="stopObs">停止推流</button><button class="meeting-button primary" :disabled="obsLoading" @click="createObs">重新生成</button></div></template><button v-else class="meeting-button primary full obs-create" :disabled="obsLoading" @click="createObs">{{ obsLoading ? '正在生成…' : '生成推流信息' }} <ArrowRight :size="17"/></button>
+      </ModalDialog>
+      <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
       <div v-if="notice" class="toast" role="status">{{ notice }}</div>
     </template>
   </main>

@@ -73,6 +73,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .meeting-button:active:not(:disabled), .button:active:not(:disabled) { transform: scale(.97); }
 .meeting-button.primary, .button-primary { background: var(--presence); color: #fff; }
 .meeting-button.primary:hover:not(:disabled), .button-primary:hover:not(:disabled) { background: var(--presence-dark); }
+.meeting-button.destructive { background: var(--danger); color:#fff; }
+.meeting-button.destructive:hover:not(:disabled) { background:#a72d2d; }
 .meeting-button.outline, .button-outline { background: var(--paper); border-color: var(--line-strong); color: var(--ink); }
 .meeting-button.outline:hover:not(:disabled), .button-outline:hover:not(:disabled) { border-color: var(--ink); }
 .meeting-button.subtle { background: #e4ebe8; }
@@ -117,7 +119,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
-  padding: 16px; background: rgba(14, 26, 43, .55); backdrop-filter: blur(3px);
+  padding: 16px; background: rgba(14, 26, 43, .55);
 }
 .modal {
   position: relative; width: min(440px, 100%); max-height: 90vh; overflow: auto;
@@ -126,6 +128,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .modal h2 { margin: 0 0 8px; font-size: 22px; font-weight: 800; letter-spacing: 0; }
 .modal-close { position: absolute; top: 16px; right: 16px; }
+.confirm-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
 .auth-switch { margin-top: 20px; font-size: 13px; color: var(--slate); text-align: center; }
 
 .loader {

@@ -1,15 +1,18 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight, CalendarDays, Check, Copy, LockKeyhole, MicOff, MonitorUp, Pencil, Plus, Trash2, Video, X } from 'lucide-vue-next'
+import { ArrowRight, CalendarDays, Check, Copy, LockKeyhole, MicOff, MonitorUp, Pencil, Plus, Trash2, Video } from 'lucide-vue-next'
 import { api } from '../api'
 import { formatNumberInput, groupNumber } from '../format'
 import { useUser } from '../stores/user'
 import { useServiceHealth } from '../stores/serviceHealth'
 import { requestError } from '../mediaErrors'
+import ModalDialog from '../components/ModalDialog.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
+const removeTarget=ref(null),removing=ref(false)
 const reduceMotion=typeof matchMedia==='function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const people=[
   {name:'林夏',initial:'林',line:'我先分享一下这周的进展。'},
@@ -74,9 +77,11 @@ async function submit(){
     }
   }catch(e){formError.value=requestError(e)}finally{saving.value=false}
 }
-async function remove(meeting){
-  if(!window.confirm(`确定删除“${meeting.title}”？正在进行的会议也会结束。`))return
-  try{await api(`/api/meetings/${meeting.number}`,{method:'DELETE'});await load();notify('会议已删除')}catch(e){notify(requestError(e))}
+async function confirmRemove(){
+  const meeting=removeTarget.value;if(!meeting || removing.value)return
+  removing.value=true
+  try{await api(`/api/meetings/${meeting.number}`,{method:'DELETE'});removeTarget.value=null;await load();notify('会议已删除')}catch(e){notify(requestError(e))}
+  finally{removing.value=false}
 }
 function inviteUrl(value){const base=new URL(import.meta.env.BASE_URL,location.origin);return import.meta.env.VITE_HASH_ROUTER==='true'?`${base.href}#/join/${value}`:`${base.href}join/${value}`}
 async function copy(meeting){
@@ -116,12 +121,13 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
       <div v-else-if="!user.current" class="meeting-empty"><div class="empty-mark"><LockKeyhole :size="22"/></div><div><strong>登录后查看你的会议</strong><p>创建会议，或通过会议号加入他人的会议。</p></div><button class="meeting-button outline" @click="user.openAuth()">登录账号 <ArrowRight :size="16"/></button></div>
       <div v-else-if="error" class="meeting-empty"><div><strong>暂时无法获取会议</strong><p>{{ error }}</p></div><button class="meeting-button outline" @click="load">重试</button></div>
       <div v-else-if="!meetings.length" class="meeting-empty"><div class="empty-mark"><CalendarDays :size="22"/></div><div><strong>还没有创建会议</strong><p>创建后，会议会出现在这里。</p></div><button class="meeting-button outline" @click="create">创建会议 <ArrowRight :size="16"/></button></div>
-      <div v-else class="meeting-list"><article v-for="meeting in meetings" :key="meeting.id" class="meeting-list-row"><div class="meeting-icon" :class="{ ended: meeting.status !== 'OPEN' }"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ meeting.title }}</span><span v-if="meeting.status !== 'OPEN'" class="ended-label">已结束</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(meeting.number) }}</span><span>创建于 {{ date(meeting.createdAt) }}</span><span v-if="meeting.hasPassword" class="meeting-lock"><LockKeyhole :size="13"/> 已设置密码</span></div></div><div class="meeting-row-actions"><button v-if="meeting.status === 'OPEN'" class="meeting-button outline small" @click="router.push(`/join/${meeting.number}`)">进入会议 <ArrowRight :size="14"/></button><button class="row-icon" :class="{ copied: copiedId===meeting.id }" :aria-label="copiedId===meeting.id ? '已复制' : '复制邀请链接'" title="复制邀请链接" @click="copy(meeting)"><Check v-if="copiedId===meeting.id" :size="16"/><Copy v-else :size="16"/></button><button v-if="meeting.status === 'OPEN'" class="row-icon" aria-label="编辑会议" title="编辑会议" @click="edit(meeting)"><Pencil :size="16"/></button><button class="row-icon danger" aria-label="删除会议" title="删除会议" @click="remove(meeting)"><Trash2 :size="16"/></button></div></article></div>
+      <div v-else class="meeting-list"><article v-for="meeting in meetings" :key="meeting.id" class="meeting-list-row"><div class="meeting-icon" :class="{ ended: meeting.status !== 'OPEN' }"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ meeting.title }}</span><span v-if="meeting.status !== 'OPEN'" class="ended-label">已结束</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(meeting.number) }}</span><span>创建于 {{ date(meeting.createdAt) }}</span><span v-if="meeting.hasPassword" class="meeting-lock"><LockKeyhole :size="13"/> 已设置密码</span></div></div><div class="meeting-row-actions"><button v-if="meeting.status === 'OPEN'" class="meeting-button outline small" @click="router.push(`/join/${meeting.number}`)">进入会议 <ArrowRight :size="14"/></button><button class="row-icon" :class="{ copied: copiedId===meeting.id }" :aria-label="copiedId===meeting.id ? '已复制' : '复制邀请链接'" title="复制邀请链接" @click="copy(meeting)"><Check v-if="copiedId===meeting.id" :size="16"/><Copy v-else :size="16"/></button><button v-if="meeting.status === 'OPEN'" class="row-icon" aria-label="编辑会议" title="编辑会议" @click="edit(meeting)"><Pencil :size="16"/></button><button class="row-icon danger" aria-label="删除会议" title="删除会议" @click="removeTarget=meeting"><Trash2 :size="16"/></button></div></article></div>
     </section>
     <footer class="meeting-footer">在场会议</footer>
-    <Teleport to="body"><div v-if="dialog" class="modal-backdrop" @click.self="dialog=''" @keydown.esc="dialog=''">
-      <section class="modal meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="meeting-dialog-title"><button class="icon-button modal-close" aria-label="关闭" @click="dialog=''"><X :size="20"/></button><h2 id="meeting-dialog-title">{{ dialog==='create' ? '创建会议' : '编辑会议' }}</h2><p class="muted">{{ dialog==='create' ? '设置会议名称，再把会议号发给要参会的人。' : '修改会议信息，新密码对之后加入的成员生效。' }}</p><form class="form-stack" @submit.prevent="submit"><label>会议名称<input v-model.trim="title" required maxlength="80" placeholder="例如：项目周会"/></label><template v-if="dialog==='edit'"><label>会议密码<select v-model="passwordAction"><option value="keep">保持当前设置</option><option value="set">设置新密码</option><option value="remove">取消密码</option></select></label></template><label v-if="dialog==='create' || passwordAction==='set'">{{ dialog==='create' ? '会议密码（选填）' : '新密码' }}<input v-model="password" type="password" maxlength="32" autocomplete="new-password" placeholder="4–32 个字符"/></label><p v-if="formError" class="form-error" role="alert">{{ formError }}</p><button class="meeting-button primary full" :disabled="saving">{{ saving ? '正在保存…' : dialog==='create' ? '创建并进入' : '保存修改' }} <ArrowRight :size="17"/></button></form></section>
-    </div></Teleport>
+    <ModalDialog :open="!!dialog" labelledby="meeting-dialog-title" dialog-class="meeting-dialog" @close="!saving && (dialog='')">
+      <h2 id="meeting-dialog-title">{{ dialog==='create' ? '创建会议' : '编辑会议' }}</h2><p class="muted">{{ dialog==='create' ? '设置会议名称，再把会议号发给要参会的人。' : '修改会议信息，新密码对之后加入的成员生效。' }}</p><form class="form-stack" @submit.prevent="submit"><label>会议名称<input v-model.trim="title" required maxlength="80" placeholder="例如：项目周会"/></label><template v-if="dialog==='edit'"><label>会议密码<select v-model="passwordAction"><option value="keep">保持当前设置</option><option value="set">设置新密码</option><option value="remove">取消密码</option></select></label></template><label v-if="dialog==='create' || passwordAction==='set'">{{ dialog==='create' ? '会议密码（选填）' : '新密码' }}<input v-model="password" type="password" maxlength="32" autocomplete="new-password" placeholder="4–32 个字符"/></label><p v-if="formError" class="form-error" role="alert">{{ formError }}</p><button class="meeting-button primary full" :disabled="saving">{{ saving ? '正在保存…' : dialog==='create' ? '创建并进入' : '保存修改' }} <ArrowRight :size="17"/></button></form>
+    </ModalDialog>
+    <ConfirmDialog :open="!!removeTarget" title="删除会议" :description="`确定删除“${removeTarget?.title || ''}”？正在进行的会议也会结束。`" confirm-text="删除会议" :busy="removing" @close="removeTarget=null" @confirm="confirmRemove" />
     <div v-if="toast" class="toast" role="status">{{ toast }}</div>
   </main>
 </template>
