@@ -45,6 +45,7 @@ npm run build
 - [部署与 OBS 说明](docs/deployment.md)
 - [课程内容与代码对应](docs/course-map.md)
 - [测试记录](docs/verification.md)
+- [会议安全核对](docs/security-review.md)
 - [会议改造计划](docs/meeting-implementation-plan.md)
 
 原直播测试记录按用户要求清空，原账号保留。项目不声称已通过生产环境安全、容量或长时间运行验收。
