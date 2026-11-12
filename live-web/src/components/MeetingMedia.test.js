@@ -61,10 +61,14 @@ describe('meeting media',()=>{
     const participant={identity:'user.u1.session',trackPublications:new Map()}
     const room={localParticipant:{identity:'user.u0.session',trackPublications:new Map()},remoteParticipants:new Map([['u1',participant]]),canPlaybackAudio:true,on:(event,fn)=>handlers.set(event,fn),off:(event)=>handlers.delete(event)}
     const wrapper=mount(MeetingMedia,{props:{room,members:[{userId:'u0',nickname:'我'},{userId:'u1',nickname:'同事'}],userId:'u0',mediaState:'connected'}})
+    await wrapper.get('[aria-label="固定我"]').trigger('click')
     participant.trackPublications.set('screen',{kind:Track.Kind.Video,source:Track.Source.ScreenShare,isMuted:false,track:screen})
     handlers.get(RoomEvent.TrackSubscribed)?.();await nextTick()
     expect(wrapper.findAll('.stage-views button')[1].attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('.tile-primary').text()).toContain('同事的屏幕')
+    expect(wrapper.get('[aria-label="取消固定我"]').attributes('aria-pressed')).toBe('true')
+    participant.trackPublications.delete('screen');handlers.get(RoomEvent.TrackUnsubscribed)?.();await nextTick()
+    expect(wrapper.get('.tile-primary').text()).toContain('我')
     wrapper.unmount()
   })
   it('shows an invitation only while the local member is alone',async()=>{

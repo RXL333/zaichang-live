@@ -10,7 +10,7 @@ import { connectionQualityLabel } from '../networkQuality'
 const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
 const emit=defineEmits(['invite'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
-const view=ref('gallery'),pinned=ref(''),page=ref(1)
+const view=ref('gallery'),pinned=ref(''),screenFocus=ref(''),page=ref(1)
 let listeners=[],audioTracks=[],pressTimer
 function uid(identity){return (identity||'').split('.')[1]||''}
 function update(){revision.value++;attachAudio();canPlay.value=props.room?.canPlaybackAudio!==false}
@@ -52,7 +52,7 @@ const tiles=computed(()=>{
   }
   return [...screens,...people]
 })
-const primary=computed(()=>tiles.value.find(tile=>tile.key===pinned.value) || tiles.value.find(tile=>tile.screen) || tiles.value.find(tile=>tile.speaking) || tiles.value[0])
+const primary=computed(()=>tiles.value.find(tile=>tile.key===screenFocus.value) || tiles.value.find(tile=>tile.key===pinned.value) || tiles.value.find(tile=>tile.screen) || tiles.value.find(tile=>tile.speaking) || tiles.value[0])
 const pageCount=computed(()=>view.value==='gallery' ? Math.max(1,Math.ceil(tiles.value.length/9)) : Math.max(1,Math.ceil((tiles.value.length-1)/8)))
 const visible=computed(()=>{
   if(view.value==='gallery')return tiles.value.slice((page.value-1)*9,page.value*9)
@@ -63,11 +63,15 @@ const visibleKeys=computed(()=>new Set(visible.value.map(tile=>tile.key)))
 const alone=computed(()=>props.members.length===1 && props.members[0].userId===props.userId)
 const layout=computed(()=>{const n=visible.value.length;return n<=1?'layout-1':n===2?'layout-2':n<=4?'layout-4':n<=6?'layout-6':'layout-9'})
 function setView(value){view.value=value;page.value=1}
-function togglePin(tile){pinned.value=pinned.value===tile.key?'':tile.key;if(pinned.value){view.value='speaker';page.value=1}}
+function togglePin(tile){screenFocus.value='';pinned.value=pinned.value===tile.key?'':tile.key;if(pinned.value){view.value='speaker';page.value=1}}
 function startPress(event,tile){if(event.pointerType!=='touch')return;clearTimeout(pressTimer);pressTimer=setTimeout(()=>togglePin(tile),550)}
 function endPress(){clearTimeout(pressTimer);pressTimer=null}
 watch(()=>tiles.value.map(tile=>tile.key),keys=>{if(pinned.value && !keys.includes(pinned.value))pinned.value='';if(page.value>pageCount.value)page.value=pageCount.value})
-watch(()=>tiles.value.filter(tile=>tile.screen).map(tile=>tile.key),(current,previous=[])=>{if(current.some(key=>!previous.includes(key))){view.value='speaker';page.value=1}},{immediate:true})
+watch(()=>tiles.value.filter(tile=>tile.screen).map(tile=>tile.key),(current,previous=[])=>{
+  const added=current.find(key=>!previous.includes(key))
+  if(added){screenFocus.value=added;view.value='speaker';page.value=1}
+  else if(screenFocus.value && !current.includes(screenFocus.value))screenFocus.value=''
+},{immediate:true})
 async function startAudio(){try{await props.room?.startAudio();canPlay.value=props.room?.canPlaybackAudio!==false}catch{canPlay.value=false}}
 watch(audioContainer,()=>attachAudio())
 onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
