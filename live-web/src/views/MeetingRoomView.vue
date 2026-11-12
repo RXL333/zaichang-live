@@ -27,6 +27,8 @@ const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 const inviteDialog=ref(false)
 const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
+const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
+let touchStartY=null
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
@@ -48,6 +50,15 @@ function flash(value){notice.value=value;clearTimeout(noticeTimer);noticeTimer=s
 const mediaDevices=useMeetingDevices({room,mediaState,notify:flash,initial:deviceDefaults})
 function openDeviceMenu(kind){deviceMenu.value=deviceMenu.value===kind?'':kind;if(deviceMenu.value)mediaDevices.refresh()}
 async function selectDevice(kind,id){if(await mediaDevices.choose(kind,id))deviceMenu.value=''}
+function openPanel(value){panel.value=value;sideOpen.value=true;moreOpen.value=false;deviceMenu.value=''}
+function closePanel(){sideOpen.value=false;nextTick(()=>moreButton.value?.focus())}
+function swipeStart(event){if(event.pointerType==='touch')touchStartY=event.clientY}
+function swipeEnd(event,direction){
+  if(touchStartY===null || event.pointerType!=='touch')return
+  const distance=event.clientY-touchStartY;touchStartY=null
+  if(direction==='up' && distance < -50)openPanel('members')
+  if(direction==='down' && distance > 50)closePanel()
+}
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
@@ -200,7 +211,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>
           <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
           <div v-else-if="['poor','lost'].includes(networkQuality)" class="conference-alert" role="status">{{ qualityReduced ? '网络不稳定，已请求降低画质。' : '网络不稳定，请检查网络连接。' }}</div>
-          <div class="conference-toolbar">
+          <div class="conference-toolbar" @pointerdown="swipeStart" @pointerup="swipeEnd($event,'up')" @pointercancel="touchStartY=null">
             <div class="toolbar-controls">
               <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:microphone }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('mic')" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><Mic v-if="microphone" :size="20"/><MicOff v-else :size="20"/><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button><button class="device-arrow" aria-label="选择麦克风和扬声器" :aria-expanded="deviceMenu==='audioinput'" @click="openDeviceMenu('audioinput')"><ChevronUp :size="14"/></button>
                 <div v-if="deviceMenu==='audioinput'" class="device-popover"><strong>麦克风</strong><button :class="{chosen:!mediaDevices.selected.microphoneId}" @click="selectDevice('audioinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audioinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.microphoneId===item.deviceId}" @click="selectDevice('audioinput',item.deviceId)">{{ item.label || `麦克风 ${index+1}` }}</button><template v-if="mediaDevices.speakerSupported"><strong>扬声器</strong><button :class="{chosen:!mediaDevices.selected.speakerId}" @click="selectDevice('audiooutput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audiooutput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.speakerId===item.deviceId}" @click="selectDevice('audiooutput',item.deviceId)">{{ item.label || `扬声器 ${index+1}` }}</button></template></div>
@@ -208,13 +219,17 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
               <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><Video v-if="camera" :size="20"/><VideoOff v-else :size="20"/><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button><button class="device-arrow" aria-label="选择摄像头" :aria-expanded="deviceMenu==='videoinput'" @click="openDeviceMenu('videoinput')"><ChevronUp :size="14"/></button>
                 <div v-if="deviceMenu==='videoinput'" class="device-popover"><strong>摄像头</strong><button :class="{chosen:!mediaDevices.selected.cameraId}" @click="selectDevice('videoinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='videoinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.cameraId===item.deviceId}" @click="selectDevice('videoinput',item.deviceId)">{{ item.label || `摄像头 ${index+1}` }}</button></div>
               </div>
-              <button class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
-              <button class="meeting-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
+              <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><MonitorUp :size="20"/><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
+              <span v-else class="screen-unavailable">当前浏览器不支持屏幕共享</span>
+              <button class="meeting-control desktop-obs-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
+              <div class="mobile-more-wrap"><button ref="moreButton" class="meeting-control" aria-label="更多会议功能" :aria-expanded="moreOpen" @click="moreOpen=!moreOpen"><MoreHorizontal :size="20"/><span>更多</span></button><div v-if="moreOpen" class="mobile-more-menu"><button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button><button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天</button><button @click="obsDialog=true;moreOpen=false"><Settings2 :size="16"/> OBS 推流</button><p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p></div></div>
               <button class="meeting-control leave-control" @click="confirmKind='leave'"><LogOut :size="20"/><span>离开</span></button>
             </div>
           </div>
         </section>
-        <aside class="conference-side">
+        <button v-if="sideOpen" class="side-backdrop" aria-label="关闭互动面板" @click="closePanel"></button>
+        <aside id="meeting-side" class="conference-side" :class="{'mobile-open':sideOpen}">
+          <button class="drawer-handle" aria-label="关闭互动面板" @pointerdown.stop="swipeStart" @pointerup.stop="swipeEnd($event,'down')" @pointercancel="touchStartY=null" @click="closePanel"><span></span></button>
           <div class="conference-tabs" role="tablist">
             <button role="tab" :aria-selected="panel==='members'" :class="{active:panel==='members'}" @click="panel='members'"><Users :size="16"/> 成员 <span>{{ members.length }}</span></button>
             <button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天</button>
