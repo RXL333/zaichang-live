@@ -12,12 +12,15 @@ import { groupNumber } from '../format'
 import { mediaError as explainMediaError, requestError } from '../mediaErrors'
 import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import InviteQr from '../components/InviteQr.vue'
+import { invitationText, meetingUrl } from '../invitation'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
 const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),draft=ref(''),panel=ref('members'),menu=ref(''),renameTarget=ref(null),renameValue=ref('')
 const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(false),obsDialog=ref(false),obsInfo=ref(null),obsLoading=ref(false),showKey=ref(false),chatList=ref(null),mediaRevision=ref(0)
 const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
+const inviteDialog=ref(false)
 let socket,leaving=false,mediaGeneration=0,noticeTimer
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
@@ -36,7 +39,7 @@ const memberMedia=computed(()=>{
   return result
 })
 function flash(value){notice.value=value;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.value='',4500)}
-function inviteUrl(){const base=new URL(import.meta.env.BASE_URL,location.origin);return import.meta.env.VITE_HASH_ROUTER==='true'?`${base.href}#/join/${number}`:`${base.href}join/${number}`}
+const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
 async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
@@ -146,7 +149,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
         </div>
         <div class="conference-header-right">
           <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
-          <button class="meeting-button conference-share" aria-label="邀请参会者" @click="copy(inviteUrl(),'邀请链接已复制')"><Copy :size="15"/> <span>邀请</span></button>
+          <button class="meeting-button conference-share" aria-label="邀请参会者" @click="inviteDialog=true"><Copy :size="15"/> <span>邀请</span></button>
           <button v-if="isHost" class="end-meeting" @click="confirmKind='end'">结束会议</button>
           <button class="user-initial" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
         </div>
@@ -198,6 +201,12 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
       </ModalDialog>
       <ModalDialog :open="obsDialog" labelledby="obs-title" dialog-class="meeting-dialog obs-dialog" @close="obsDialog=false">
         <h2 id="obs-title">通过 OBS 推流</h2><p class="muted">在 OBS 的“设置 → 推流”中选择 WHIP，填入下面的信息。OBS 与浏览器请勿同时采集同一个麦克风，以免产生回声。</p><template v-if="obsInfo"><div class="obs-fields"><label>服务器地址<div><input readonly :value="obsInfo.url"/><button @click="copy(obsInfo.url)" aria-label="复制服务器地址"><Copy :size="16"/></button></div></label><label>Bearer Token<div><input readonly :type="showKey?'text':'password'" :value="obsInfo.streamKey"/><button @click="showKey=!showKey">{{ showKey ? '隐藏' : '显示' }}</button><button @click="copy(obsInfo.streamKey)" aria-label="复制 Token"><Copy :size="16"/></button></div></label></div><p class="obs-note">请勿向他人泄露 Token。重新生成会使原推流地址失效。</p><div class="obs-actions"><button class="meeting-button outline" :disabled="obsLoading" @click="stopObs">停止推流</button><button class="meeting-button primary" :disabled="obsLoading" @click="createObs">重新生成</button></div></template><button v-else class="meeting-button primary full obs-create" :disabled="obsLoading" @click="createObs">{{ obsLoading ? '正在生成…' : '生成推流信息' }} <ArrowRight :size="17"/></button>
+      </ModalDialog>
+      <ModalDialog :open="inviteDialog" labelledby="invite-title" dialog-class="meeting-dialog invite-dialog" @close="inviteDialog=false">
+        <h2 id="invite-title">邀请参会</h2><p class="muted">分享邀请信息，或让参会者扫描二维码加入。</p>
+        <InviteQr v-if="inviteDialog" :value="inviteUrl" />
+        <p class="invite-copy">{{ inviteText }}</p>
+        <button class="meeting-button primary full" @click="copy(inviteText,'邀请信息已复制')"><Copy :size="16"/> 复制邀请信息</button>
       </ModalDialog>
       <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
       <div v-if="notice" class="toast" role="status">{{ notice }}</div>

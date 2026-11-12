@@ -10,6 +10,7 @@ import { requestError } from '../mediaErrors'
 import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useMotion } from '../useMotion'
+import { extractMeetingNumber, invitationText } from '../invitation'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
@@ -62,6 +63,7 @@ async function create(){
 }
 function edit(meeting){selected.value=meeting;title.value=meeting.title;password.value='';passwordAction.value='keep';formError.value='';dialog.value='edit'}
 function onNumberInput(event){const formatted=formatNumberInput(event.target.value);number.value=formatted;event.target.value=formatted}
+function onNumberPaste(event){const text=event.clipboardData?.getData('text');if(!text)return;event.preventDefault();number.value=formatNumberInput(extractMeetingNumber(text));event.target.value=number.value}
 function join(){
   const value=number.value.trim().replace(/\s/g,'')
   if(!/^\d{9}$/.test(value)){shake.value=false;nextTick(()=>{shake.value=true});notify('请输入 9 位会议号');return}
@@ -85,9 +87,8 @@ async function confirmRemove(){
   try{await api(`/api/meetings/${meeting.number}`,{method:'DELETE'});removeTarget.value=null;await load();notify('会议已删除')}catch(e){notify(requestError(e))}
   finally{removing.value=false}
 }
-function inviteUrl(value){const base=new URL(import.meta.env.BASE_URL,location.origin);return import.meta.env.VITE_HASH_ROUTER==='true'?`${base.href}#/join/${value}`:`${base.href}join/${value}`}
 async function copy(meeting){
-  try{await navigator.clipboard.writeText(inviteUrl(meeting.number));notify('邀请链接已复制');copiedId.value=meeting.id;clearTimeout(copiedTimer);copiedTimer=setTimeout(()=>copiedId.value='',1800)}
+  try{await navigator.clipboard.writeText(invitationText(meeting));notify('邀请信息已复制');copiedId.value=meeting.id;clearTimeout(copiedTimer);copiedTimer=setTimeout(()=>copiedId.value='',1800)}
   catch{notify('复制失败，请手动分享会议号')}
 }
 function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'short',day:'numeric'}).format(value)}
@@ -98,7 +99,7 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
       <div class="hero-text">
         <h1><span class="line rise">你在场，</span><span class="line rise" style="--d:.08s">会议就开始了。</span></h1>
         <p class="rise" style="--d:.2s">创建会议，或输入 9 位会议号加入。进入时默认不开摄像头和麦克风，什么时候打开由你决定。</p>
-        <div class="rise" style="--d:.3s"><form class="join-plate" :class="{ complete: digits===9, shake }" @submit.prevent="join" @animationend="shake=false"><input :value="number" @input="onNumberInput" inputmode="numeric" maxlength="11" autocomplete="off" aria-label="会议号" placeholder="000 000 000"/><button>加入会议 <ArrowRight :size="18"/></button><span class="join-progress" :style="{ transform:`scaleX(${digits/9})` }" aria-hidden="true"></span></form></div>
+        <div class="rise" style="--d:.3s"><form class="join-plate" :class="{ complete: digits===9, shake }" @submit.prevent="join" @animationend="shake=false"><input :value="number" @input="onNumberInput" @paste="onNumberPaste" inputmode="numeric" maxlength="11" autocomplete="off" aria-label="会议号" placeholder="000 000 000"/><button>加入会议 <ArrowRight :size="18"/></button><span class="join-progress" :style="{ transform:`scaleX(${digits/9})` }" aria-hidden="true"></span></form></div>
         <div class="hero-create rise" style="--d:.4s"><span>没有会议号？</span><button class="meeting-button outline" @click="create"><Video :size="17"/> 创建会议</button></div>
       </div>
       <div ref="stage" class="hero-stage rise-stage" :class="{ 'motion-paused':pageHidden }" aria-hidden="true" @pointermove="tilt" @pointerleave="untilt">
@@ -123,7 +124,7 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
       <div v-else-if="!user.current" class="meeting-empty"><div class="empty-mark"><LockKeyhole :size="22"/></div><div><strong>登录后查看你的会议</strong><p>创建会议，或通过会议号加入他人的会议。</p></div><button class="meeting-button outline" @click="user.openAuth()">登录账号 <ArrowRight :size="16"/></button></div>
       <div v-else-if="error" class="meeting-empty"><div><strong>暂时无法获取会议</strong><p>{{ error }}</p></div><button class="meeting-button outline" @click="load">重试</button></div>
       <div v-else-if="!meetings.length" class="meeting-empty"><div class="empty-mark"><CalendarDays :size="22"/></div><div><strong>还没有创建会议</strong><p>创建后，会议会出现在这里。</p></div><button class="meeting-button outline" @click="create">创建会议 <ArrowRight :size="16"/></button></div>
-      <div v-else class="meeting-list"><article v-for="meeting in meetings" :key="meeting.id" class="meeting-list-row"><div class="meeting-icon" :class="{ ended: meeting.status !== 'OPEN' }"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ meeting.title }}</span><span v-if="meeting.status !== 'OPEN'" class="ended-label">已结束</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(meeting.number) }}</span><span>创建于 {{ date(meeting.createdAt) }}</span><span v-if="meeting.hasPassword" class="meeting-lock"><LockKeyhole :size="13"/> 已设置密码</span></div></div><div class="meeting-row-actions"><button v-if="meeting.status === 'OPEN'" class="meeting-button outline small" @click="router.push(`/join/${meeting.number}`)">进入会议 <ArrowRight :size="14"/></button><button class="row-icon" :class="{ copied: copiedId===meeting.id }" :aria-label="copiedId===meeting.id ? '已复制' : '复制邀请链接'" title="复制邀请链接" @click="copy(meeting)"><Check v-if="copiedId===meeting.id" :size="16"/><Copy v-else :size="16"/></button><button v-if="meeting.status === 'OPEN'" class="row-icon" aria-label="编辑会议" title="编辑会议" @click="edit(meeting)"><Pencil :size="16"/></button><button class="row-icon danger" aria-label="删除会议" title="删除会议" @click="removeTarget=meeting"><Trash2 :size="16"/></button></div></article></div>
+      <div v-else class="meeting-list"><article v-for="meeting in meetings" :key="meeting.id" class="meeting-list-row"><div class="meeting-icon" :class="{ ended: meeting.status !== 'OPEN' }"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ meeting.title }}</span><span v-if="meeting.status !== 'OPEN'" class="ended-label">已结束</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(meeting.number) }}</span><span>创建于 {{ date(meeting.createdAt) }}</span><span v-if="meeting.hasPassword" class="meeting-lock"><LockKeyhole :size="13"/> 已设置密码</span></div></div><div class="meeting-row-actions"><button v-if="meeting.status === 'OPEN'" class="meeting-button outline small" @click="router.push(`/join/${meeting.number}`)">进入会议 <ArrowRight :size="14"/></button><button class="row-icon" :class="{ copied: copiedId===meeting.id }" :aria-label="copiedId===meeting.id ? '已复制' : '复制邀请信息'" title="复制邀请信息" @click="copy(meeting)"><Check v-if="copiedId===meeting.id" :size="16"/><Copy v-else :size="16"/></button><button v-if="meeting.status === 'OPEN'" class="row-icon" aria-label="编辑会议" title="编辑会议" @click="edit(meeting)"><Pencil :size="16"/></button><button class="row-icon danger" aria-label="删除会议" title="删除会议" @click="removeTarget=meeting"><Trash2 :size="16"/></button></div></article></div>
     </section>
     <footer class="meeting-footer">在场会议</footer>
     <ModalDialog :open="!!dialog" labelledby="meeting-dialog-title" dialog-class="meeting-dialog" @close="!saving && (dialog='')">

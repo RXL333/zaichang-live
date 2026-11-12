@@ -23,6 +23,18 @@ describe('meeting home',()=>{
     expect(wrapper.text()).toContain('会议画面示意')
     wrapper.unmount()
   })
+  it('accepts a complete invitation pasted into the meeting number field',async()=>{
+    const wrapper=mount(MeetingHomeView)
+    const input=wrapper.get('input[aria-label="会议号"]')
+    const event=new Event('paste',{bubbles:true,cancelable:true})
+    Object.defineProperty(event,'clipboardData',{value:{getData:()=> '会议主题：2026 周会\n会议号：123 456 789\n加入链接：https://example.org/#/join/123456789'}})
+    input.element.dispatchEvent(event)
+    await wrapper.vm.$nextTick()
+    expect(input.element.value).toBe('123 456 789')
+    await wrapper.get('form.join-plate').trigger('submit')
+    expect(push).toHaveBeenCalledWith('/join/123456789')
+    wrapper.unmount()
+  })
   it('loads meetings after the service recovers',async()=>{
     const user=useUser(),service=useServiceHealth()
     user.current={id:'user-1',nickname:'小林'}

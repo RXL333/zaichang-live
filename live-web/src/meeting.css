@@ -136,6 +136,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .modal h2 { margin: 0 0 8px; font-size: 22px; font-weight: 800; letter-spacing: 0; }
 .modal-close { position: absolute; top: 16px; right: 16px; }
 .confirm-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; }
+.invite-qr { display:block; width:180px; max-width:65%; margin:20px auto; border:1px solid var(--line); border-radius:8px; }
+.invite-copy { margin:0 0 18px; padding:14px; border-radius:8px; background:var(--mist); color:var(--slate); font-size:13px; line-height:1.7; white-space:pre-line; overflow-wrap:anywhere; }
 .auth-switch { margin-top: 20px; font-size: 13px; color: var(--slate); text-align: center; }
 
 .loader {
