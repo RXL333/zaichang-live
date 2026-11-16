@@ -671,6 +671,11 @@ span.line.rise { display: block; }
 .conference-message.pending p { opacity:.75; }
 .retry-message { border:0; padding:0; background:none; color:#f3c779; font-size:12px; text-decoration:underline; }
 .chat-counter { padding:0 14px 5px; color:var(--room-muted); font-size:12px; text-align:right; }
+.shortcuts-dialog dl { display:grid; gap:10px; margin:20px 0 0; }
+.shortcuts-dialog dl div { display:flex; align-items:center; gap:14px; }
+.shortcuts-dialog dt { width:48px; }
+.shortcuts-dialog dd { margin:0; font-size:14px; }
+.shortcuts-dialog kbd { display:inline-block; min-width:28px; padding:3px 6px; border:1px solid var(--line); border-radius:5px; background:var(--mist); text-align:center; font:600 12px var(--font); }
 .conference-chat-form { display: flex; gap: 8px; margin: 0 12px 12px; padding: 6px 6px 6px 14px; border: 1px solid var(--room-line); border-radius: 12px; background: var(--room); }
 .conference-chat-form:focus-within { border-color: var(--presence-bright); }
 .conference-chat-form input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--room-text); font-size: 14px; }
@@ -788,6 +793,7 @@ span.line.rise { display: block; }
   .meeting-stage .conference-tiles { padding-top:42px; padding-bottom:34px; }
   .conference-side { height:85dvh; }
 }
+@media (max-width:700px) { .shortcut-trigger { display:none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .unread-badge { animation:none; }

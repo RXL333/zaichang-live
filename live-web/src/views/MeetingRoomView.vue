@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
@@ -28,6 +28,7 @@ const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(
 const muteFeedback=ref(false)
 const confirmKind=ref(''),confirmTarget=ref(null),confirmBusy=ref(false)
 const inviteDialog=ref(false)
+const shortcutsDialog=ref(false)
 const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
@@ -238,9 +239,25 @@ async function confirmAction(){
   }finally{confirmKind.value='';confirmTarget.value=null;confirmBusy.value=false}
 }
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
+function onShortcut(event){
+  if(event.key==='Escape'){
+    if(shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value)return
+    if(sideOpen.value)closePanel();else if(panel.value==='chat')panel.value='members'
+    deviceMenu.value='';menu.value='';moreOpen.value=false;return
+  }
+  if(!meeting.value || fatal.value || event.ctrlKey || event.metaKey || event.altKey || event.repeat || shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value)return
+  const target=event.target
+  if(target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))return
+  const key=event.key.toLowerCase()
+  if(key==='?'){event.preventDefault();shortcutsDialog.value=true;return}
+  if(key==='c'){event.preventDefault();openPanel('chat');return}
+  if(deviceBusy.value || mediaDevices.switching.value)return
+  const kind=({m:'mic',v:'camera',s:'screen'})[key]
+  if(kind && (kind!=='screen' || screenShareSupported)){event.preventDefault();device(kind)}
+}
 function updateWidth(){narrowScreen.value=!!widthQuery?.matches}
-onMounted(()=>{widthQuery=window.matchMedia?.('(max-width: 900px)');updateWidth();widthQuery?.addEventListener?.('change',updateWidth);load()})
-onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);widthQuery?.removeEventListener?.('change',updateWidth);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
+onMounted(()=>{widthQuery=window.matchMedia?.('(max-width: 900px)');updateWidth();widthQuery?.addEventListener?.('change',updateWidth);document.addEventListener('keydown',onShortcut);load()})
+onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);widthQuery?.removeEventListener?.('change',updateWidth);document.removeEventListener('keydown',onShortcut);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
 </script>
 <template>
   <main class="conference-page">
@@ -256,6 +273,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
         <div class="conference-header-right">
           <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
           <button class="meeting-button conference-share" aria-label="邀请参会者" @click="inviteDialog=true"><Copy :size="15"/> <span>邀请</span></button>
+          <button class="meeting-button conference-share shortcut-trigger" aria-label="查看快捷键" @click="shortcutsDialog=true"><Keyboard :size="16"/></button>
           <button v-if="isHost" class="end-meeting" @click="confirmKind='end'">结束会议</button>
           <button class="user-initial" :style="avatarStyle(user.current.id)" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
         </div>
@@ -278,7 +296,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
               <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <span v-else class="screen-unavailable">当前浏览器不支持屏幕共享</span>
               <button class="meeting-control desktop-obs-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
-              <div class="mobile-more-wrap"><button ref="moreButton" class="meeting-control" :aria-label="unread ? `更多会议功能，${unread} 条未读消息` : '更多会议功能'" :aria-expanded="moreOpen" @click="moreOpen=!moreOpen"><MoreHorizontal :size="20"/><span>更多<span v-if="unread" class="mobile-unread"> · {{ unread>99 ? '99+' : unread }}</span></span></button><div v-if="moreOpen" class="mobile-more-menu"><button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button><button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天 <span v-if="unread">（{{ unread }}）</span></button><button @click="obsDialog=true;moreOpen=false"><Settings2 :size="16"/> OBS 推流</button><p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p></div></div>
+              <div class="mobile-more-wrap"><button ref="moreButton" class="meeting-control" :aria-label="unread ? `更多会议功能，${unread} 条未读消息` : '更多会议功能'" :aria-expanded="moreOpen" @click="moreOpen=!moreOpen"><MoreHorizontal :size="20"/><span>更多<span v-if="unread" class="mobile-unread"> · {{ unread>99 ? '99+' : unread }}</span></span></button><div v-if="moreOpen" class="mobile-more-menu"><button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button><button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天 <span v-if="unread">（{{ unread }}）</span></button><button @click="obsDialog=true;moreOpen=false"><Settings2 :size="16"/> OBS 推流</button><button @click="shortcutsDialog=true;moreOpen=false"><Keyboard :size="16"/> 快捷键</button><p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p></div></div>
               <button class="meeting-control leave-control" @click="confirmKind='leave'"><LogOut :size="20"/><span>离开</span></button>
             </div>
           </div>
@@ -323,6 +341,10 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
         <InviteQr v-if="inviteDialog" :value="inviteUrl" />
         <p class="invite-copy">{{ inviteText }}</p>
         <button class="meeting-button primary full" @click="copy(inviteText,'邀请信息已复制')"><Copy :size="16"/> 复制邀请信息</button>
+      </ModalDialog>
+      <ModalDialog :open="shortcutsDialog" labelledby="shortcuts-title" dialog-class="meeting-dialog shortcuts-dialog" @close="shortcutsDialog=false">
+        <h2 id="shortcuts-title">键盘快捷键</h2><p class="muted">输入文字时，快捷键不会触发。</p>
+        <dl><div><dt><kbd>M</kbd></dt><dd>开启或关闭麦克风</dd></div><div><dt><kbd>V</kbd></dt><dd>开启或关闭摄像头</dd></div><div><dt><kbd>S</kbd></dt><dd>共享或停止共享屏幕</dd></div><div><dt><kbd>C</kbd></dt><dd>打开聊天</dd></div><div><dt><kbd>Esc</kbd></dt><dd>关闭面板</dd></div><div><dt><kbd>?</kbd></dt><dd>查看快捷键</dd></div></dl>
       </ModalDialog>
       <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
       <div v-if="notice" class="toast" role="status">{{ notice }}</div>

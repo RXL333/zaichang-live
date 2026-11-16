@@ -187,6 +187,23 @@ it('shows unread messages and preserves a scrolled-up chat position',async()=>{
   wrapper.unmount()
 })
 
+it('ignores shortcuts while typing and opens a keyboard-accessible shortcut list',async()=>{
+  const wrapper=mount(MeetingRoomView,{attachTo:document.body,global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
+  await wrapper.findAll('[role="tab"]').find(tab=>tab.text().includes('聊天')).trigger('click')
+  await wrapper.get('input[aria-label="会议消息"]').trigger('keydown',{key:'m'})
+  expect(socketMock.microphone).not.toHaveBeenCalled()
+  document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'m',bubbles:true}))
+  await vi.waitFor(()=>expect(socketMock.microphone).toHaveBeenCalledWith(true))
+  document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'?',bubbles:true}))
+  await wrapper.vm.$nextTick()
+  expect(document.querySelector('[role="dialog"]').textContent).toContain('键盘快捷键')
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))
+  await wrapper.vm.$nextTick()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  wrapper.unmount()
+})
+
 it('turns off a camera request that finishes after removal from the meeting',async()=>{
   let finishCamera
   socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())
