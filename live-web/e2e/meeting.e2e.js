@@ -42,6 +42,16 @@ async function tabTo(page,selector){
   throw new Error(`Keyboard focus did not reach ${selector}`)
 }
 
+test('the homepage illustration releases its entrance transform',async({page})=>{
+  await mockBackend(page)
+  await page.goto('/')
+  const stage=page.locator('.hero-stage')
+  await expect(stage).toBeVisible()
+  await expect.poll(()=>stage.evaluate(element=>getComputedStyle(element).transform)).toBe('none')
+  expect(await stage.evaluate(element=>getComputedStyle(element).opacity)).toBe('1')
+  if(process.env.PHASE3_SCREENSHOTS)await page.screenshot({path:'../output/phase3-home-after-fix.png'})
+})
+
 test('meeting number, join validation and keyboard meeting flow',async({page})=>{
   await mockBackend(page)
   await page.goto('/')

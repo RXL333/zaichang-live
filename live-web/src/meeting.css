@@ -330,7 +330,7 @@ html.shared-number-transition .join-plate input, html.shared-number-transition .
 /* 首页进入动效：标题、说明、输入框、示意房间依次出现，只在页面载入时播放一次 */
 .rise { animation: rise var(--motion-entrance) var(--motion-ease) var(--d, 0s) both; }
 span.line.rise { display: block; }
-.rise-stage { animation: rise-stage var(--motion-entrance) var(--motion-ease) .25s both; }
+.rise-stage { animation: rise-stage var(--motion-entrance) var(--motion-ease) .25s backwards; }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @keyframes rise-stage { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
 
