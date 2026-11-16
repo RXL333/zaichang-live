@@ -381,6 +381,14 @@ span.line.rise { display: block; }
 .meeting-lock { display: inline-flex; align-items: center; gap: 4px; }
 .ended-label { padding: 2px 8px; border-radius: 99px; background: #e7ebea; color: var(--slate); font-size: 12px; font-weight: 600; }
 .meeting-row-actions { display: flex; align-items: center; gap: 4px; }
+.recent-meetings { margin-top:48px; }
+.meeting-ended-page { min-height:calc(100vh - 80px); display:grid; place-items:center; padding:48px 20px; }
+.meeting-ended-card { width:min(100%,520px); padding:40px; border:1px solid var(--line); border-radius:18px; background:var(--paper); text-align:center; }
+.meeting-ended-card > .logo-mark { margin:0 auto 20px; }
+.meeting-ended-card h1 { margin:4px 0 14px; font-size:30px; }
+.meeting-ended-card p { margin:8px 0; color:var(--slate); }
+.meeting-ended-card .ended-eyebrow { color:var(--presence); font-size:13px; font-weight:700; }
+.ended-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-top:26px; }
 .meeting-state { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; color:var(--presence-dark); font-size:12px; font-weight:600; }
 .meeting-state i { width:7px; height:7px; border-radius:50%; background:var(--presence); }
 .meeting-state.ended { color:var(--slate-soft); }

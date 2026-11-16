@@ -7,6 +7,7 @@ import { useUser } from '../stores/user'
 import { useServiceHealth } from '../stores/serviceHealth'
 import { api } from '../api'
 import { preloadMeeting } from '../meetingRoutes'
+import { rememberMeeting } from '../recentMeetings'
 
 const push=vi.hoisted(()=>vi.fn())
 vi.mock('vue-router',()=>({useRouter:()=>({push})}))
@@ -14,7 +15,7 @@ vi.mock('../api',()=>({api:vi.fn(),resetCsrf:vi.fn()}))
 vi.mock('../meetingRoutes',()=>({preloadMeeting:vi.fn()}))
 
 describe('meeting home',()=>{
-  beforeEach(()=>{setActivePinia(createPinia());push.mockReset();api.mockReset();preloadMeeting.mockReset();useUser().ready=true})
+  beforeEach(()=>{localStorage.clear();setActivePinia(createPinia());push.mockReset();api.mockReset();preloadMeeting.mockReset();useUser().ready=true})
   it('normalizes a pasted meeting number and joins the correct room',async()=>{
     const wrapper=mount(MeetingHomeView,{global:{stubs:{teleport:true}}})
     const input=wrapper.get('input[aria-label="会议号"]')
@@ -61,6 +62,18 @@ describe('meeting home',()=>{
     expect(rows[0].text()).toContain('进行中')
     expect(rows[1].text()).toContain('已结束')
     expect(rows[1].text()).not.toContain('进入会议')
+    wrapper.unmount()
+  })
+  it('shows recently joined meetings and clears them from the browser',async()=>{
+    rememberMeeting({number:'123456789',title:'曾参加的会议'})
+    useServiceHealth().status='ready'
+    api.mockResolvedValue({status:'ENDED'})
+    const wrapper=mount(MeetingHomeView)
+    await vi.waitFor(()=>expect(wrapper.text()).toContain('曾参加的会议'))
+    await vi.waitFor(()=>expect(wrapper.get('.recent-meetings').text()).toContain('已结束'))
+    expect(wrapper.get('.recent-meetings').text()).not.toContain('进入会议')
+    await wrapper.findAll('button').find(button=>button.text()==='清除记录').trigger('click')
+    expect(wrapper.find('.recent-meetings').exists()).toBe(false)
     wrapper.unmount()
   })
   it('does not delete a meeting until its confirmation is accepted',async()=>{

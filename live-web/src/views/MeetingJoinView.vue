@@ -10,6 +10,7 @@ import { requestError } from '../mediaErrors'
 import { useJoinDevices } from '../devicePreferences'
 import DeviceCheck from '../components/DeviceCheck.vue'
 import LogoMark from '../components/LogoMark.vue'
+import { rememberMeeting } from '../recentMeetings'
 
 const route=useRoute(),router=useRouter(),user=useUser(),service=useServiceHealth(),joinDevices=useJoinDevices()
 const meeting=ref(null),loading=ref(true),joining=ref(false),error=ref(''),errorKind=ref(''),joinError=ref(''),nickname=ref(''),password=ref('')
@@ -44,6 +45,7 @@ async function join(){
   joining.value=true;joinError.value=''
   try{
     await api(`/api/meetings/${route.params.number}/join`,{method:'POST',body:{nickname:nickname.value||user.current.nickname,password:password.value}})
+    rememberMeeting({number:route.params.number,title:meeting.value?.title})
     joinDevices.prepare(route.params.number,deviceSelection.value);password.value='';router.push(`/meeting/${route.params.number}`)
   }catch(e){
     if(e.status===423)errorKind.value='locked'

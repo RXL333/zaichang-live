@@ -8,6 +8,7 @@ export default createRouter({
     { path: '/', component: MeetingHomeView },
     { path: '/join/:number', component: loadMeetingJoin },
     { path: '/meeting/:number', component: loadMeetingRoom },
+    { path: '/ended/:number', component: () => import('./views/MeetingEndedView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),

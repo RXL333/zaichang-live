@@ -32,6 +32,7 @@ const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 let touchStartY=null
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
+const enteredAt=Date.now()
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
 const connectionText=computed(()=>({connected:'连接正常',connecting:'正在连接',reconnecting:'正在重连',expired:'请重新加入',closed:'已断开'})[connection.value]||'连接中')
@@ -74,7 +75,11 @@ function handleEvent(event){
     if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed)failed.failed=true}
     flash(event.message);if(connection.value==='expired'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
   }
-  if(event.type==='KICKED' || event.type==='ENDED'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
+  if(event.type==='KICKED'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
+  if(event.type==='ENDED' && !leaving){leaving=true;mediaGeneration++;socket?.close();room.value?.disconnect();room.value=null;showEnded(true)}
+}
+function showEnded(meetingEnded=false){
+  router.push({path:`/ended/${number}`,state:{meetingTitle:meeting.value?.title || '',elapsedSeconds:Math.max(0,Math.floor((Date.now()-enteredAt)/1000)),meetingEnded}})
 }
 function connectSocket(){
   socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
@@ -187,9 +192,9 @@ async function stopObs(){obsLoading.value=true;try{await api(`/api/meetings/${nu
 async function leave(){
   leaving=true;mediaGeneration++;socket?.close()
   try{await api(`/api/meetings/${number}/obs`,{method:'DELETE'})}catch{flash('OBS 推流未能确认关闭，请在 OBS 中停止推流。')}
-  await room.value?.disconnect();room.value=null;router.push('/')
+  await room.value?.disconnect();room.value=null;showEnded()
 }
-async function endMeeting(){try{await api(`/api/meetings/${number}/end`,{method:'POST'});leaving=true;socket?.close();await room.value?.disconnect();router.push('/')}catch(e){flash(requestError(e))}}
+async function endMeeting(){try{await api(`/api/meetings/${number}/end`,{method:'POST'});if(leaving)return;leaving=true;socket?.close();await room.value?.disconnect();showEnded(true)}catch(e){flash(requestError(e))}}
 const confirmation=computed(()=>({
   leave:{title:'离开会议',description:'确定离开当前会议？你可以使用会议号重新加入。',action:'离开会议'},
   end:{title:'结束会议',description:'确定结束本次会议？所有成员将离开会议。',action:'结束会议'},

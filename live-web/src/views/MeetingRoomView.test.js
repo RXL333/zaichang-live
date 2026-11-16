@@ -8,7 +8,8 @@ import { useJoinDevices } from '../devicePreferences'
 import MeetingRoomView from './MeetingRoomView.vue'
 
 const socketMock = vi.hoisted(() => ({ onEvent: null, onState:null, rooms:[], send: vi.fn(() => true), close: vi.fn(), connect:vi.fn(async()=>{}), microphone:vi.fn(async()=>{}), camera:vi.fn(async()=>{}) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { number: '123456789' } }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
+const routePush=vi.hoisted(()=>vi.fn())
+vi.mock('vue-router', () => ({ useRoute: () => ({ params: { number: '123456789' } }), useRouter: () => ({ push: routePush, replace: vi.fn() }) }))
 vi.mock('../api', () => ({ api: vi.fn(), resetCsrf: vi.fn() }))
 vi.mock('../meetingSocket', () => ({ createMeetingSocket: ({ onState, onEvent }) => {
   socketMock.onEvent = onEvent; socketMock.onState=onState; onState('connected'); return { send: socketMock.send, close: socketMock.close }
@@ -138,6 +139,14 @@ it('gives a non-blocking notification when the host mutes the microphone',async(
   expect(wrapper.text()).toContain('主持人已将你静音')
   expect(wrapper.get('[aria-label="开启麦克风"]').classes()).toContain('mute-feedback')
   expect(wrapper.get('[aria-label="开启麦克风"]').element.disabled).toBe(false)
+  wrapper.unmount()
+})
+
+it('opens the ended page when the host ends the meeting',async()=>{
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
+  socketMock.onEvent({type:'ENDED',message:'会议已结束'})
+  expect(routePush).toHaveBeenCalledWith(expect.objectContaining({path:'/ended/123456789',state:expect.objectContaining({meetingEnded:true,meetingTitle:'项目会议'})}))
   wrapper.unmount()
 })
 

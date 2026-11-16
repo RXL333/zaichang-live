@@ -12,10 +12,12 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useMotion } from '../useMotion'
 import { extractMeetingNumber, invitationText } from '../invitation'
 import { preloadMeeting } from '../meetingRoutes'
+import { clearRecent, readRecent } from '../recentMeetings'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
 const removeTarget=ref(null),removing=ref(false)
+const recent=ref(readRecent())
 const { reduced:reduceMotion }=useMotion(),pageHidden=ref(typeof document!=='undefined' && document.hidden)
 const people=[
   {name:'林夏',initial:'林',line:'我先分享一下这周的进展。'},
@@ -25,7 +27,7 @@ const people=[
 const speaker=ref(0),stage=ref(null),shake=ref(false),copiedId=ref('')
 const digits=computed(()=>number.value.replace(/\s/g,'').length)
 watch(digits,count=>{if(count===9)preloadMeeting()})
-let requestId=0,toastTimer,cycle,copiedTimer
+let requestId=0,recentRequestId=0,toastTimer,cycle,copiedTimer
 function notify(message){toast.value=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.value='',3500)}
 function startCycle(){clearInterval(cycle);cycle=null;pageHidden.value=document.hidden;if(reduceMotion.value || pageHidden.value)return;cycle=setInterval(()=>{speaker.value=(speaker.value+1)%people.length},3000)}
 function pickSpeaker(index){speaker.value=index;startCycle()}
@@ -51,6 +53,16 @@ async function load(){
   finally{if(current===requestId)loading.value=false}
 }
 watch(()=>[user.ready,user.current?.id,service.status],([ready,,status])=>{if(ready && status==='ready')load()},{immediate:true})
+async function loadRecent(){
+  const current=++recentRequestId
+  const rows=await Promise.all(recent.value.map(async item=>{
+    try{const info=await api(`/api/meetings/${item.number}`);return {...item,status:info.status==='OPEN'?'OPEN':'ENDED'}}
+    catch(e){return {...item,status:e.status===404?'ENDED':'UNKNOWN'}}
+  }))
+  if(current===recentRequestId)recent.value=rows
+}
+function removeRecent(){recentRequestId++;clearRecent();recent.value=[]}
+watch(()=>service.status,status=>{if(status==='ready' && recent.value.length)loadRecent()},{immediate:true})
 watch(reduceMotion,()=>{if(reduceMotion.value)untilt();startCycle()})
 onMounted(()=>{document.addEventListener('visibilitychange',startCycle);startCycle()})
 onBeforeUnmount(()=>{document.removeEventListener('visibilitychange',startCycle);clearInterval(cycle);clearTimeout(toastTimer);clearTimeout(copiedTimer)})
@@ -129,6 +141,10 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
       <div v-else-if="error" class="meeting-empty"><div><strong>暂时无法获取会议</strong><p>{{ error }}</p></div><button class="meeting-button outline" @click="load">重试</button></div>
       <div v-else-if="!meetings.length" class="meeting-empty"><div class="empty-mark"><CalendarDays :size="22"/></div><div><strong>还没有创建会议</strong><p>创建后，会议会出现在这里。</p></div><button class="meeting-button outline" @click="create">创建会议 <ArrowRight :size="16"/></button></div>
       <div v-else class="meeting-list"><article v-for="meeting in meetings" :key="meeting.id" class="meeting-list-row"><div class="meeting-icon" :class="{ ended: meeting.status !== 'OPEN' }"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ meeting.title }}</span><span class="meeting-state" :class="{ ended: meeting.status !== 'OPEN' }"><i aria-hidden="true"></i>{{ meeting.status === 'OPEN' ? '进行中' : '已结束' }}</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(meeting.number) }}</span><span>创建于 {{ date(meeting.createdAt) }}</span><span v-if="meeting.hasPassword" class="meeting-lock"><LockKeyhole :size="13"/> 已设置密码</span></div></div><div class="meeting-row-actions"><button v-if="meeting.status === 'OPEN'" class="meeting-button outline small" @click="router.push(`/join/${meeting.number}`)">进入会议 <ArrowRight :size="14"/></button><button class="row-icon" :class="{ copied: copiedId===meeting.id }" :aria-label="copiedId===meeting.id ? '已复制' : '复制邀请信息'" title="复制邀请信息" @click="copy(meeting)"><Check v-if="copiedId===meeting.id" :size="16"/><Copy v-else :size="16"/></button><button v-if="meeting.status === 'OPEN'" class="row-icon" aria-label="编辑会议" title="编辑会议" @click="edit(meeting)"><Pencil :size="16"/></button><button class="row-icon danger" aria-label="删除会议" title="删除会议" @click="removeTarget=meeting"><Trash2 :size="16"/></button></div></article></div>
+    </section>
+    <section v-if="recent.length" class="recent-meetings" aria-labelledby="recent-heading">
+      <div class="section-line"><div><h2 id="recent-heading">最近加入</h2><p>仅保存在当前浏览器，最多显示 5 场。</p></div><button class="meeting-button subtle" @click="removeRecent">清除记录</button></div>
+      <div class="meeting-list"><article v-for="item in recent" :key="item.number" class="meeting-list-row"><div class="meeting-icon" :class="{ended:item.status==='ENDED'}"><Video :size="18"/></div><div class="meeting-list-main"><div class="meeting-list-title"><span>{{ item.title }}</span><span v-if="item.status==='ENDED'" class="meeting-state ended"><i aria-hidden="true"></i>已结束</span></div><div class="meeting-list-meta"><span class="meeting-number">{{ groupNumber(item.number) }}</span><span>加入于 {{ date(item.joinedAt) }}</span><span v-if="item.status==='UNKNOWN'">状态暂不可用</span></div></div><div class="meeting-row-actions"><button v-if="item.status==='OPEN'" class="meeting-button outline small" @click="router.push(`/join/${item.number}`)">进入会议 <ArrowRight :size="14"/></button></div></article></div>
     </section>
     <footer class="meeting-footer">在场会议</footer>
     <ModalDialog :open="!!dialog" labelledby="meeting-dialog-title" dialog-class="meeting-dialog" @close="!saving && (dialog='')">
