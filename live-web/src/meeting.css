@@ -4,6 +4,16 @@
    本文件在 style.css 之后加载，会覆盖其中与会议页面共用的基础类。
    ========================================================================== */
 
+/* Only digits and spaces use this subset; Chinese continues to use system fonts. */
+@font-face {
+  font-family: "Meeting Digits";
+  src: url('./assets/fonts/meeting-digits.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  unicode-range: U+0020, U+0030-0039;
+}
+
 :root {
   --mist: #f1f4f2;
   --paper: #ffffff;
@@ -232,6 +242,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   flex: 1; min-width: 0; padding: 16px 20px;
   border: 0; outline: 0; background: transparent; color: var(--ink);
   font-size: clamp(26px, 3.4vw, 40px); font-weight: 700; letter-spacing: .08em; font-variant-numeric: tabular-nums;
+}
+.join-plate input, .room-number, .meeting-number, .conference-title small, .alone-card > span {
+  font-family: "Meeting Digits", Consolas, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
 }
 .join-plate input::placeholder { color: #8a979e; font-weight: 600; }
 .join-plate button {
