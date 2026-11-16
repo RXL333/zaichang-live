@@ -25,7 +25,7 @@ const people=[
   {name:'周朗',initial:'周',line:'屏幕大家都能看到吗？'},
   {name:'陈叙',initial:'陈',line:'能看到，数据很清楚。'},
 ]
-const speaker=ref(0),stage=ref(null),shake=ref(false),copiedId=ref('')
+const speaker=ref(0),stage=ref(null),shake=ref(false),copiedId=ref(''),heroEntranceDone=ref(false)
 const digits=computed(()=>number.value.replace(/\s/g,'').length)
 watch(digits,count=>{if(count===9)preloadMeeting()})
 let requestId=0,recentRequestId=0,toastTimer,cycle,copiedTimer
@@ -117,7 +117,7 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
         <div class="rise" style="--d:.3s"><form class="join-plate" :class="{ complete: digits===9, shake }" @submit.prevent="join" @animationend="shake=false"><input :value="number" @input="onNumberInput" @paste="onNumberPaste" inputmode="numeric" maxlength="11" autocomplete="off" aria-label="会议号" placeholder="000 000 000"/><button>加入会议 <ArrowRight :size="18"/></button><span class="join-progress" :style="{ transform:`scaleX(${digits/9})` }" aria-hidden="true"></span></form></div>
         <div class="hero-create rise" style="--d:.4s"><span>没有会议号？</span><button class="meeting-button outline" @click="create"><Video :size="17"/> 创建会议</button></div>
       </div>
-      <div ref="stage" class="hero-stage rise-stage" :class="{ 'motion-paused':pageHidden }" aria-hidden="true" @pointermove="tilt" @pointerleave="untilt">
+      <div ref="stage" class="hero-stage rise-stage" :class="{ 'motion-paused':pageHidden, 'entrance-done':heroEntranceDone }" aria-hidden="true" @animationend.self="heroEntranceDone=true" @pointermove="tilt" @pointerleave="untilt">
         <div class="hero-room">
           <span class="hero-room-count"><i></i>会议画面示意</span>
           <div class="hero-room-grid">

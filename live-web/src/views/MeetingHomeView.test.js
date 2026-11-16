@@ -27,6 +27,13 @@ describe('meeting home',()=>{
     expect(wrapper.text()).toContain('会议画面示意')
     wrapper.unmount()
   })
+  it('releases the homepage entrance animation when it finishes',async()=>{
+    const wrapper=mount(MeetingHomeView)
+    const stage=wrapper.get('.hero-stage')
+    await stage.trigger('animationend')
+    expect(stage.classes()).toContain('entrance-done')
+    wrapper.unmount()
+  })
   it('accepts a complete invitation pasted into the meeting number field',async()=>{
     const wrapper=mount(MeetingHomeView)
     const input=wrapper.get('input[aria-label="会议号"]')

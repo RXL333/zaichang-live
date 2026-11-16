@@ -331,6 +331,7 @@ html.shared-number-transition .join-plate input, html.shared-number-transition .
 .rise { animation: rise var(--motion-entrance) var(--motion-ease) var(--d, 0s) both; }
 span.line.rise { display: block; }
 .rise-stage { animation: rise-stage var(--motion-entrance) var(--motion-ease) .25s backwards; }
+.hero-stage.entrance-done { animation:none; }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @keyframes rise-stage { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
 
@@ -813,6 +814,7 @@ span.line.rise { display: block; }
   .tile-motion-move, .tile-motion-enter-active, .tile-motion-leave-active { transition:opacity var(--motion-instant) linear; }
   .tile-motion-enter-from, .tile-motion-leave-to { transform:none; }
   .rise, .rise-stage, .hero-chat { animation: reduced-fade var(--motion-instant) ease both !important; }
+  .hero-stage.entrance-done { animation:none !important; }
   .join-plate.shake, .wave i, .loader { animation: none !important; }
   .hero-room { transform: none !important; }
   .hero-stage::before, .feature::before, .meeting-list-row, .meeting-list-row::before { transition: none; }
