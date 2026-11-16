@@ -7,8 +7,11 @@ import { useServiceHealth } from './stores/serviceHealth'
 import AccountDialog from './components/AccountDialog.vue'
 import LogoMark from './components/LogoMark.vue'
 import ServiceStatus from './components/ServiceStatus.vue'
+import { sharedNumberTransition } from './routeMotion'
 
 const user=useUser(),service=useServiceHealth(),route=useRoute(),router=useRouter(),menu=ref(false)
+const animateRoute=ref(false)
+watch(()=>route.path,(to,from)=>{animateRoute.value=!to.startsWith('/meeting/') && !from?.startsWith('/meeting/') && !sharedNumberTransition.value},{flush:'sync'})
 watch(()=>route.path,path=>{if((path==='/' || path.startsWith('/join/')) && service.status==='idle')service.start()},{immediate:true})
 watch(()=>service.status,status=>{if(status==='ready' && (!user.ready || user.loadError))user.load()},{immediate:true})
 onMounted(()=>{if(route.path.startsWith('/meeting/'))user.load()})
@@ -25,7 +28,7 @@ async function myMeetings(){await router.push('/');await nextTick();document.get
       <div v-if="menu" class="mobile-account"><button v-if="!user.current" @click="user.openAuth();menu=false">登录 / 注册</button><button v-else @click="logout">退出登录</button></div>
     </header>
     <ServiceStatus v-if="!route.path.startsWith('/meeting/')" />
-    <RouterView :key="route.fullPath" />
+    <RouterView v-slot="{ Component }"><Transition name="page" mode="out-in" :css="animateRoute"><component :is="Component" :key="route.fullPath" /></Transition></RouterView>
     <AccountDialog />
   </div>
 </template>

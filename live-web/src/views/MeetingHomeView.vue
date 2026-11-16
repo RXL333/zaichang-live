@@ -13,6 +13,7 @@ import { useMotion } from '../useMotion'
 import { extractMeetingNumber, invitationText } from '../invitation'
 import { preloadMeeting } from '../meetingRoutes'
 import { clearRecent, readRecent } from '../recentMeetings'
+import { goToMeetingJoin } from '../routeMotion'
 
 const router=useRouter(),user=useUser(),service=useServiceHealth(),number=ref(''),meetings=ref([]),loading=ref(false),error=ref(''),toast=ref('')
 const dialog=ref(''),title=ref(''),password=ref(''),passwordAction=ref('keep'),selected=ref(null),saving=ref(false),formError=ref('')
@@ -81,7 +82,7 @@ function onNumberPaste(event){const text=event.clipboardData?.getData('text');if
 function join(){
   const value=number.value.trim().replace(/\s/g,'')
   if(!/^\d{9}$/.test(value)){shake.value=false;nextTick(()=>{shake.value=true});notify('请输入 9 位会议号');return}
-  router.push(`/join/${value}`)
+  goToMeetingJoin(router,`/join/${value}`,reduceMotion.value)
 }
 async function submit(){
   formError.value='';saving.value=true

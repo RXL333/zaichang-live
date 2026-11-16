@@ -67,6 +67,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .conference-app { min-height: 100vh; overflow-x: clip; }
 .inside-meeting { background: var(--room); color: var(--room-text); }
+.page-enter-active { transition:opacity var(--motion-transition) var(--motion-ease); }
+.page-leave-active { transition:opacity var(--motion-exit) var(--motion-ease); }
+.page-enter-from, .page-leave-to { opacity:0; }
+html.shared-number-transition .join-plate input, html.shared-number-transition .join-intro .room-number { view-transition-name:meeting-number; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration:var(--motion-transition); }
+::view-transition-group(meeting-number) { animation-duration:var(--motion-transition); animation-timing-function:var(--motion-ease); }
 .service-status { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:8px 16px; padding:10px 20px; background:#fff3d6; color:#60460c; font-size:14px; }
 .service-status button, .service-status a { border:0; padding:0; background:none; color:inherit; text-decoration:underline; text-underline-offset:3px; font-weight:600; }
 .service-status-enter-active { transition:opacity var(--motion-transition) var(--motion-ease); }
@@ -796,6 +802,7 @@ span.line.rise { display: block; }
 @media (max-width:700px) { .shortcut-trigger { display:none; } }
 
 @media (prefers-reduced-motion: reduce) {
+  .page-enter-active, .page-leave-active { transition:opacity var(--motion-instant) linear; }
   .unread-badge { animation:none; }
   .chat-motion-enter-active { transition:opacity var(--motion-instant) linear; }
   .chat-motion-enter-from { transform:none; }
