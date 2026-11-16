@@ -85,3 +85,25 @@ test('content security policy permits the configured backend and LiveKit origins
   })
   expect(result).toEqual({health:'OK',socket:true,violations:[]})
 })
+
+for(const viewport of [{width:375,height:667},{width:667,height:375},{width:1280,height:800}]){
+  test(`meeting controls fit ${viewport.width}x${viewport.height}`,async({page})=>{
+    await page.setViewportSize(viewport)
+    await mockBackend(page)
+    await page.goto('/join/123456789')
+    await page.getByLabel('会议密码').fill('1234')
+    await page.getByRole('button',{name:'加入会议'}).click()
+    await expect(page.getByLabel('开启麦克风')).toBeVisible()
+    const result=await page.evaluate(()=>{
+      const button=document.querySelector('.leave-control').getBoundingClientRect()
+      return {overflow:document.documentElement.scrollWidth>innerWidth,top:button.top,bottom:button.bottom,height:innerHeight}
+    })
+    expect(result.overflow).toBe(false)
+    expect(result.top).toBeGreaterThanOrEqual(0)
+    expect(result.bottom).toBeLessThanOrEqual(result.height+1)
+    if(process.env.PHASE3_SCREENSHOTS){
+      await page.waitForTimeout(400)
+      await page.screenshot({path:`../output/phase3-meeting-${viewport.width}x${viewport.height}.png`})
+    }
+  })
+}
