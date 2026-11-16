@@ -7,15 +7,20 @@ import LogoMark from './LogoMark.vue'
 import { groupNumber } from '../format'
 import { connectionQualityLabel } from '../networkQuality'
 import { avatarStyle } from '../avatarColors'
+import { useSpeakerActivity } from '../useSpeakerActivity'
 
 const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
 const emit=defineEmits(['invite'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
 const view=ref('gallery'),pinned=ref(''),screenFocus=ref(''),page=ref(1)
+const speakers=useSpeakerActivity()
 let listeners=[],audioTracks=[],pressTimer
 function uid(identity){return (identity||'').split('.')[1]||''}
 function update(){revision.value++;attachAudio();canPlay.value=props.room?.canPlaybackAudio!==false}
-function updateSpeakers(){revision.value++}
+function updateSpeakers(people){
+  if(Array.isArray(people))speakers.update(people.map(person=>uid(person.identity)))
+  revision.value++
+}
 function clearAudio(){for(const {track,element} of audioTracks){track.detach(element);element.remove()}audioTracks=[]}
 function attachAudio(){
   clearAudio();if(!props.room || !audioContainer.value)return
@@ -27,9 +32,10 @@ function attachAudio(){
 function subscribe(room){
   if(!room)return
   const events=[RoomEvent.ParticipantConnected,RoomEvent.ParticipantDisconnected,RoomEvent.TrackPublished,RoomEvent.TrackUnpublished,RoomEvent.TrackSubscribed,RoomEvent.TrackUnsubscribed,RoomEvent.TrackMuted,RoomEvent.TrackUnmuted,RoomEvent.LocalTrackPublished,RoomEvent.LocalTrackUnpublished,RoomEvent.AudioPlaybackStatusChanged,RoomEvent.ActiveSpeakersChanged,RoomEvent.ConnectionQualityChanged]
-  listeners=events.filter(Boolean).map(event=>{const callback=[RoomEvent.ActiveSpeakersChanged,RoomEvent.ConnectionQualityChanged].includes(event)?updateSpeakers:update;room.on(event,callback);return {event,callback}});update()
+  listeners=events.filter(Boolean).map(event=>{const callback=event===RoomEvent.ActiveSpeakersChanged?updateSpeakers:event===RoomEvent.ConnectionQualityChanged?()=>{revision.value++}:update;room.on(event,callback);return {event,callback}})
+  updateSpeakers([room.localParticipant,...room.remoteParticipants.values()].filter(person=>person.isSpeaking));update()
 }
-function unsubscribe(room){if(room)listeners.forEach(({event,callback})=>room.off(event,callback));listeners=[];clearAudio()}
+function unsubscribe(room){if(room)listeners.forEach(({event,callback})=>room.off(event,callback));listeners=[];speakers.clear();clearAudio()}
 watch(()=>props.room,(next,old)=>{unsubscribe(old);subscribe(next)},{immediate:true})
 const tiles=computed(()=>{
   revision.value
@@ -37,11 +43,10 @@ const tiles=computed(()=>{
   const screens=[],people=[]
   for(const member of props.members){
     const sources=participants.filter(p=>uid(p.identity)===member.userId)
-    let camera=null,microphone=false,obs=false,speaking=false,quality='unknown'
+    let camera=null,microphone=false,obs=false,quality='unknown'
     for(const person of sources){
       const isObs=person.identity?.startsWith('obs.');obs ||= !!isObs
       if(!isObs || quality==='unknown')quality=person.connectionQuality || 'unknown'
-      if(person.isSpeaking)speaking=true
       for(const publication of person.trackPublications.values()){
         if(publication.kind===Track.Kind.Audio && !publication.isMuted && (isObs || publication.source===Track.Source.Microphone))microphone=true
         if(!publication.track || publication.isMuted || publication.kind!==Track.Kind.Video)continue
@@ -49,7 +54,7 @@ const tiles=computed(()=>{
         else if(!camera || isObs)camera=publication.track
       }
     }
-    people.push({key:`person-${member.userId}`,userId:member.userId,track:camera,name:member.nickname,microphone,obs,speaking,host:member.host,local:member.userId===props.userId,quality})
+    people.push({key:`person-${member.userId}`,userId:member.userId,track:camera,name:member.nickname,microphone,obs,speaking:speakers.active.value.has(member.userId),host:member.host,local:member.userId===props.userId,quality})
   }
   return [...screens,...people]
 })
@@ -84,7 +89,7 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
     <template v-else>
       <div class="stage-views" aria-label="画面布局"><button :class="{active:view==='gallery'}" :aria-pressed="view==='gallery'" @click="setView('gallery')">画廊</button><button :class="{active:view==='speaker'}" :aria-pressed="view==='speaker'" @click="setView('speaker')">演讲者</button></div>
       <div class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}">
-        <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
+        <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'speaking-primary':tile.speaking && speakers.recent.value===tile.userId, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
           <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
           <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>

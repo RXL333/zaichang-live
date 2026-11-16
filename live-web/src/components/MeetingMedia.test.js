@@ -15,9 +15,10 @@ describe('meeting media',()=>{
     await nextTick()
     expect(audio.attach).toHaveBeenCalledTimes(1)
     remote.isSpeaking=true
-    handlers.get(RoomEvent.ActiveSpeakersChanged)?.([])
+    handlers.get(RoomEvent.ActiveSpeakersChanged)?.([remote])
     await nextTick()
     expect(wrapper.find('.conference-tile').classes()).toContain('speaking')
+    expect(wrapper.find('.conference-tile').classes()).toContain('speaking-primary')
     expect(audio.attach).toHaveBeenCalledTimes(1)
     expect(audio.detach).not.toHaveBeenCalled()
     remote.connectionQuality='poor'
