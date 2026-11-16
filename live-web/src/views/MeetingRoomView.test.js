@@ -204,6 +204,19 @@ it('ignores shortcuts while typing and opens a keyboard-accessible shortcut list
   wrapper.unmount()
 })
 
+it('announces membership, new messages and host mute to assistive technology',async()=>{
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
+  socketMock.onEvent({type:'MEMBERS',members:[{userId:'user-1',nickname:'小林'}]})
+  socketMock.onEvent({type:'MEMBERS',members:[{userId:'user-1',nickname:'小林'},{userId:'user-2',nickname:'同事'}]})
+  await flushPromises();expect(wrapper.get('.room-announcements').text()).toContain('同事加入会议')
+  socketMock.onEvent({type:'CHAT',id:'1',seq:1,user_id:'user-2',nickname:'同事',created_at:Date.now(),content:'你好'})
+  await flushPromises();expect(wrapper.get('.room-announcements').text()).toContain('同事发来一条消息')
+  socketMock.onEvent({type:'MUTED',message:'主持人已将你静音'})
+  await flushPromises();expect(wrapper.get('.room-announcements').text()).toContain('主持人已将你静音')
+  wrapper.unmount()
+})
+
 it('turns off a camera request that finishes after removal from the meeting',async()=>{
   let finishCamera
   socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())

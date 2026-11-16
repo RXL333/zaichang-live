@@ -60,9 +60,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   outline: 2px solid var(--presence);
   outline-offset: 2px;
 }
-.inside-meeting button:focus-visible, .inside-meeting a:focus-visible, .inside-meeting input:focus-visible {
-  outline-color: var(--presence-bright);
+.inside-meeting :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline:2px solid #fff; outline-offset:2px; box-shadow:0 0 0 4px #0a111c;
 }
+.sr-only { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 ::selection { background: var(--presence-wash); color: var(--ink); }
 
 .conference-app { min-height: 100vh; overflow-x: clip; }

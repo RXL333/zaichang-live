@@ -23,6 +23,7 @@ import { groupChat } from '../chatText'
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
+const announcement=ref('')
 const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),draft=ref(''),panel=ref('members'),menu=ref(''),renameTarget=ref(null),renameValue=ref('')
 const camera=ref(false),microphone=ref(false),sharing=ref(false),deviceBusy=ref(false),obsDialog=ref(false),obsInfo=ref(null),obsLoading=ref(false),showKey=ref(false),chatList=ref(null),mediaRevision=ref(0)
 const muteFeedback=ref(false)
@@ -37,6 +38,7 @@ const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || s
 let widthQuery
 let touchStartY=null
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
+let membersInitialized=false
 const pendingTimers=new Map()
 const enteredAt=Date.now()
 const isHost=computed(()=>meeting.value?.isOwner===true)
@@ -56,7 +58,8 @@ const memberMedia=computed(()=>{
   }
   return result
 })
-function flash(value){notice.value=value;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.value='',4500)}
+function announce(value){announcement.value='';nextTick(()=>{announcement.value=value || ''})}
+function flash(value){notice.value=value;announce(value);clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.value='',4500)}
 const mediaDevices=useMeetingDevices({room,mediaState,notify:flash,initial:deviceDefaults})
 function openDeviceMenu(kind){deviceMenu.value=deviceMenu.value===kind?'':kind;if(deviceMenu.value)mediaDevices.refresh()}
 async function selectDevice(kind,id){if(await mediaDevices.choose(kind,id))deviceMenu.value=''}
@@ -79,6 +82,7 @@ function addMessage(message,incoming=false){
   const nearBottom=nearChatBottom()
   messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq)
   if(incoming && message.user_id!==user.current?.id && !chatVisible.value)unread.value++
+  if(incoming && message.user_id!==user.current?.id)announce(`${message.nickname || '成员'}发来一条消息`)
   nextTick(()=>{if(chatVisible.value && nearBottom)scrollChatBottom();else if(chatVisible.value && incoming)showNewMessages.value=true})
 }
 watch(chatVisible,visible=>{if(visible)unread.value=0})
@@ -93,7 +97,16 @@ function sendPending(item){
 function retryMessage(item){if(!item)return;if(connection.value!=='connected'){flash('连接已断开，请稍后重试');return}sendPending(item)}
 async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
 function handleEvent(event){
-  if(event.type==='MEMBERS')members.value=event.members||[]
+  if(event.type==='MEMBERS'){
+    const next=event.members||[]
+    if(membersInitialized){
+      const before=new Map(members.value.map(member=>[member.userId,member.nickname])),after=new Map(next.map(member=>[member.userId,member.nickname]))
+      const joined=next.filter(member=>!before.has(member.userId)),left=members.value.filter(member=>!after.has(member.userId))
+      const changes=[joined.length ? `${joined.map(member=>member.nickname).join('、')}加入会议` : '',left.length ? `${left.map(member=>member.nickname).join('、')}离开会议` : ''].filter(Boolean)
+      if(changes.length)announce(changes.join('；'))
+    }
+    members.value=next;membersInitialized=true
+  }
   if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event,event.type==='CHAT');clearPendingTimer(event.client_id);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
   if(event.type==='MUTED'){hostMuteRevision++;microphone.value=false;if(initialMedia)initialMedia.microphoneOn=false;if(restoreMedia)restoreMedia.microphoneOn=false;flash(event.message);muteFeedback.value=false;nextTick(()=>muteFeedback.value=true)}
   if(event.type==='NOTICE')flash(event.message)
@@ -261,6 +274,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
 </script>
 <template>
   <main class="conference-page">
+    <div class="sr-only room-announcements" aria-live="polite" aria-atomic="true">{{ announcement }}</div>
     <div v-if="loading" class="conference-full-state"><span class="loader"></span> 正在进入会议…</div>
     <div v-else-if="fatal" class="conference-full-state"><strong>{{ fatal }}</strong><button class="meeting-button outline" @click="router.push('/')">返回首页</button></div>
     <template v-else-if="meeting">
@@ -347,7 +361,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
         <dl><div><dt><kbd>M</kbd></dt><dd>开启或关闭麦克风</dd></div><div><dt><kbd>V</kbd></dt><dd>开启或关闭摄像头</dd></div><div><dt><kbd>S</kbd></dt><dd>共享或停止共享屏幕</dd></div><div><dt><kbd>C</kbd></dt><dd>打开聊天</dd></div><div><dt><kbd>Esc</kbd></dt><dd>关闭面板</dd></div><div><dt><kbd>?</kbd></dt><dd>查看快捷键</dd></div></dl>
       </ModalDialog>
       <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
-      <div v-if="notice" class="toast" role="status">{{ notice }}</div>
+      <div v-if="notice" class="toast">{{ notice }}</div>
     </template>
   </main>
 </template>
