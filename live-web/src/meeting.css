@@ -650,7 +650,14 @@ span.line.rise { display: block; }
 .member-popover .danger-text { color: #ef8a8a; }
 .panel-empty { padding: 28px 10px; font-size: 13px; color: var(--room-muted); text-align: center; }
 
-.conference-chat { flex: 1; min-height: 0; padding: 6px 16px 12px; overflow: auto; }
+.chat-scroll-wrap { position:relative; flex:1; min-height:0; }
+.conference-chat { height:100%; min-height: 0; padding: 6px 16px 12px; overflow: auto; }
+.chat-new-messages { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); padding:6px 12px; border:1px solid var(--room-line); border-radius:20px; background:var(--room-raise); color:var(--room-text); font-size:12px; white-space:nowrap; }
+.unread-badge { display:inline-grid; place-items:center; min-width:19px; height:19px; padding:0 4px; border-radius:10px; background:var(--presence); color:#fff !important; animation:unread-pop var(--motion-transition) var(--motion-ease); }
+.mobile-unread { color:var(--presence-bright); }
+@keyframes unread-pop { 50% { transform:scale(1.12); } }
+.chat-motion-enter-active { transition:opacity var(--motion-transition) var(--motion-ease), transform var(--motion-transition) var(--motion-ease); }
+.chat-motion-enter-from { opacity:0; transform:translateY(6px); }
 .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; min-height: 180px; color: var(--room-muted); font-size: 13px; text-align: center; }
 .chat-empty strong { color: var(--room-text); font-size: 14px; }
 .conference-message { position:relative; min-height:30px; margin-bottom: 18px; padding-left:38px; overflow-wrap: anywhere; }
@@ -783,6 +790,9 @@ span.line.rise { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .unread-badge { animation:none; }
+  .chat-motion-enter-active { transition:opacity var(--motion-instant) linear; }
+  .chat-motion-enter-from { transform:none; }
   .meeting-control.mute-feedback .control-symbol { animation:none; }
   .meeting-control:active:not(:disabled) .control-symbol { transform:none; }
   .tile-motion-move, .tile-motion-enter-active, .tile-motion-leave-active { transition:opacity var(--motion-instant) linear; }

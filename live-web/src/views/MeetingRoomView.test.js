@@ -167,6 +167,26 @@ it('renders chat links safely and groups consecutive messages',async()=>{
   wrapper.unmount()
 })
 
+it('shows unread messages and preserves a scrolled-up chat position',async()=>{
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
+  const message=(id)=>({type:'CHAT',id,seq:Number(id),user_id:'other',nickname:'同事',created_at:Date.now(),content:'新消息'})
+  socketMock.onEvent(message('1'));await wrapper.vm.$nextTick()
+  expect(wrapper.get('.unread-badge').text()).toBe('1')
+  await wrapper.findAll('[role="tab"]').find(tab=>tab.text().includes('聊天')).trigger('click')
+  expect(wrapper.find('.unread-badge').exists()).toBe(false)
+  const list=wrapper.get('.conference-chat').element
+  Object.defineProperty(list,'scrollHeight',{configurable:true,value:1000})
+  Object.defineProperty(list,'clientHeight',{configurable:true,value:200})
+  list.scrollTop=100
+  socketMock.onEvent(message('2'));await wrapper.vm.$nextTick();await wrapper.vm.$nextTick()
+  expect(list.scrollTop).toBe(100)
+  expect(wrapper.text()).toContain('有新消息')
+  await wrapper.get('.chat-new-messages').trigger('click')
+  expect(list.scrollTop).toBe(1000)
+  wrapper.unmount()
+})
+
 it('turns off a camera request that finishes after removal from the meeting',async()=>{
   let finishCamera
   socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())

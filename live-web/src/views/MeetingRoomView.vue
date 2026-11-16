@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
 import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
@@ -31,6 +31,9 @@ const inviteDialog=ref(false)
 const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
+const unread=ref(0),showNewMessages=ref(false),narrowScreen=ref(false)
+const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || sideOpen.value))
+let widthQuery
 let touchStartY=null
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
 const pendingTimers=new Map()
@@ -67,7 +70,17 @@ function swipeEnd(event,direction){
 }
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
-function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
+function nearChatBottom(){const list=chatList.value;return !list || list.scrollHeight-list.scrollTop-list.clientHeight<=80}
+function scrollChatBottom(){if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight;showNewMessages.value=false}
+function onChatScroll(){if(nearChatBottom())showNewMessages.value=false}
+function addMessage(message,incoming=false){
+  if(!message?.id || messages.value.some(item=>item.id===message.id))return
+  const nearBottom=nearChatBottom()
+  messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq)
+  if(incoming && message.user_id!==user.current?.id && !chatVisible.value)unread.value++
+  nextTick(()=>{if(chatVisible.value && nearBottom)scrollChatBottom();else if(chatVisible.value && incoming)showNewMessages.value=true})
+}
+watch(chatVisible,visible=>{if(visible)unread.value=0})
 function clearPendingTimer(id){clearTimeout(pendingTimers.get(id));pendingTimers.delete(id)}
 function sendPending(item){
   clearPendingTimer(item.client_id)
@@ -80,7 +93,7 @@ function retryMessage(item){if(!item)return;if(connection.value!=='connected'){f
 async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
 function handleEvent(event){
   if(event.type==='MEMBERS')members.value=event.members||[]
-  if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);clearPendingTimer(event.client_id);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
+  if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event,event.type==='CHAT');clearPendingTimer(event.client_id);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
   if(event.type==='MUTED'){hostMuteRevision++;microphone.value=false;if(initialMedia)initialMedia.microphoneOn=false;if(restoreMedia)restoreMedia.microphoneOn=false;flash(event.message);muteFeedback.value=false;nextTick(()=>muteFeedback.value=true)}
   if(event.type==='NOTICE')flash(event.message)
   if(event.type==='ERROR'){
@@ -225,8 +238,9 @@ async function confirmAction(){
   }finally{confirmKind.value='';confirmTarget.value=null;confirmBusy.value=false}
 }
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
-onMounted(load)
-onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
+function updateWidth(){narrowScreen.value=!!widthQuery?.matches}
+onMounted(()=>{widthQuery=window.matchMedia?.('(max-width: 900px)');updateWidth();widthQuery?.addEventListener?.('change',updateWidth);load()})
+onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);widthQuery?.removeEventListener?.('change',updateWidth);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
 </script>
 <template>
   <main class="conference-page">
@@ -264,7 +278,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);fo
               <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <span v-else class="screen-unavailable">当前浏览器不支持屏幕共享</span>
               <button class="meeting-control desktop-obs-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
-              <div class="mobile-more-wrap"><button ref="moreButton" class="meeting-control" aria-label="更多会议功能" :aria-expanded="moreOpen" @click="moreOpen=!moreOpen"><MoreHorizontal :size="20"/><span>更多</span></button><div v-if="moreOpen" class="mobile-more-menu"><button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button><button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天</button><button @click="obsDialog=true;moreOpen=false"><Settings2 :size="16"/> OBS 推流</button><p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p></div></div>
+              <div class="mobile-more-wrap"><button ref="moreButton" class="meeting-control" :aria-label="unread ? `更多会议功能，${unread} 条未读消息` : '更多会议功能'" :aria-expanded="moreOpen" @click="moreOpen=!moreOpen"><MoreHorizontal :size="20"/><span>更多<span v-if="unread" class="mobile-unread"> · {{ unread>99 ? '99+' : unread }}</span></span></button><div v-if="moreOpen" class="mobile-more-menu"><button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button><button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天 <span v-if="unread">（{{ unread }}）</span></button><button @click="obsDialog=true;moreOpen=false"><Settings2 :size="16"/> OBS 推流</button><p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p></div></div>
               <button class="meeting-control leave-control" @click="confirmKind='leave'"><LogOut :size="20"/><span>离开</span></button>
             </div>
           </div>
@@ -274,7 +288,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);fo
           <button class="drawer-handle" aria-label="关闭互动面板" @pointerdown.stop="swipeStart" @pointerup.stop="swipeEnd($event,'down')" @pointercancel="touchStartY=null" @click="closePanel"><span></span></button>
           <div class="conference-tabs" role="tablist">
             <button role="tab" :aria-selected="panel==='members'" :class="{active:panel==='members'}" @click="panel='members'"><Users :size="16"/> 成员 <span>{{ members.length }}</span></button>
-            <button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天</button>
+            <button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天 <span v-if="unread" :key="unread" class="unread-badge" :aria-label="`${unread} 条未读消息`">{{ unread>99 ? '99+' : unread }}</span></button>
           </div>
           <div v-if="panel==='members'" class="members-panel">
             <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
@@ -289,10 +303,10 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);fo
             <div v-if="!members.length" class="panel-empty">正在同步成员…</div>
           </div>
           <template v-else>
-            <div ref="chatList" class="conference-chat">
+            <div class="chat-scroll-wrap"><div ref="chatList" class="conference-chat" @scroll="onChatScroll">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
-              <div v-for="message in chatMessages" :key="message.id || message.client_id" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div>
-            </div>
+              <TransitionGroup name="chat-motion" tag="div"><div v-for="message in chatMessages" :key="message.id || message.client_id" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div></TransitionGroup>
+            </div><button v-if="showNewMessages" class="chat-new-messages" @click="scrollChatBottom">有新消息 ↓</button></div>
             <div v-if="draft.length>=900" class="chat-counter" aria-live="polite">还可输入 {{ 1000-draft.length }} 字</div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>
