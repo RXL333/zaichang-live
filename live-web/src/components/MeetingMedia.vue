@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { RoomEvent, Track } from 'livekit-client'
 import { ChevronLeft, ChevronRight, Mic, MicOff, MonitorUp, Pin, PinOff, Volume2 } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
@@ -12,6 +12,7 @@ import { useSpeakerActivity } from '../useSpeakerActivity'
 const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
 const emit=defineEmits(['invite'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
+const tilesContainer=ref(null)
 const view=ref('gallery'),pinned=ref(''),screenFocus=ref(''),page=ref(1)
 const speakers=useSpeakerActivity()
 let listeners=[],audioTracks=[],pressTimer
@@ -68,7 +69,23 @@ const visible=computed(()=>{
 const visibleKeys=computed(()=>new Set(visible.value.map(tile=>tile.key)))
 const alone=computed(()=>props.members.length===1 && props.members[0].userId===props.userId)
 const layout=computed(()=>{const n=visible.value.length;return n<=1?'layout-1':n===2?'layout-2':n<=4?'layout-4':n<=6?'layout-6':'layout-9'})
+// Animate size changes with transforms without replacing the existing video nodes.
+watch([view,()=>primary.value?.key], async ()=>{
+  const container=tilesContainer.value?.$el || tilesContainer.value
+  if(!container || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)return
+  const previous=new Map([...container.querySelectorAll('[data-tile-key]')].map(el=>[el.dataset.tileKey,el.getBoundingClientRect()]))
+  await nextTick()
+  for(const el of container.querySelectorAll('[data-tile-key]')){
+    const from=previous.get(el.dataset.tileKey),to=el.getBoundingClientRect()
+    if(!from || !from.width || !from.height || !to.width || !to.height || (from.width===to.width && from.height===to.height))continue
+    el.animate?.([{transform:`translate(${from.left-to.left}px, ${from.top-to.top}px) scale(${from.width/to.width}, ${from.height/to.height})`,transformOrigin:'top left'},{transform:'none',transformOrigin:'top left'}],{duration:200,easing:'cubic-bezier(.2,.7,.2,1)'})
+  }
+})
 function setView(value){view.value=value;page.value=1}
+function prepareTileLeave(el){
+  const parent=el.parentElement,from=el.getBoundingClientRect(),bounds=parent.getBoundingClientRect()
+  Object.assign(el.style,{width:`${from.width}px`,height:`${from.height}px`,left:`${from.left-bounds.left+parent.scrollLeft}px`,top:`${from.top-bounds.top+parent.scrollTop}px`})
+}
 function togglePin(tile){screenFocus.value='';pinned.value=pinned.value===tile.key?'':tile.key;if(pinned.value){view.value='speaker';page.value=1}}
 function startPress(event,tile){if(event.pointerType!=='touch')return;clearTimeout(pressTimer);pressTimer=setTimeout(()=>togglePin(tile),550)}
 function endPress(){clearTimeout(pressTimer);pressTimer=null}
@@ -88,14 +105,14 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
     <div v-if="!tiles.length" class="meeting-stage-empty"><LogoMark /><strong>{{ mediaState==='connecting' ? '正在连接会议' : '等待成员加入' }}</strong><p>{{ mediaState==='connecting' ? '音视频连接中，请稍候。' : '成员加入后，画面会显示在这里。' }}</p></div>
     <template v-else>
       <div class="stage-views" aria-label="画面布局"><button :class="{active:view==='gallery'}" :aria-pressed="view==='gallery'" @click="setView('gallery')">画廊</button><button :class="{active:view==='speaker'}" :aria-pressed="view==='speaker'" @click="setView('speaker')">演讲者</button></div>
-      <div class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}">
-        <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'speaking-primary':tile.speaking && speakers.recent.value===tile.userId, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
+      <TransitionGroup ref="tilesContainer" tag="div" name="tile-motion" class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}" @before-leave="prepareTileLeave">
+        <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" :data-tile-key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'speaking-primary':tile.speaking && speakers.recent.value===tile.userId, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
           <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
           <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>
           <div v-if="tile.screen" class="tile-screen-label"><MonitorUp :size="14"/> {{ tile.name }}的屏幕</div><div v-else class="tile-name"><span>{{ tile.name }}{{ tile.local ? '（我）' : '' }}</span><span v-if="tile.host" class="tile-host">主持人</span><span v-if="tile.obs" class="tile-obs">OBS</span><Mic v-if="tile.microphone" :size="14"/><MicOff v-else class="mic-off" :size="14"/></div>
         </div>
-      </div>
+      </TransitionGroup>
       <nav v-if="pageCount>1" class="stage-pagination" aria-label="画面分页"><button :disabled="page===1" aria-label="上一页画面" @click="page--"><ChevronLeft :size="15"/></button><span>{{ page }} / {{ pageCount }}</span><button :disabled="page===pageCount" aria-label="下一页画面" @click="page++"><ChevronRight :size="15"/></button></nav>
     </template>
     <Transition name="alone-card"><div v-if="alone" class="alone-card"><strong>你是第一个到场的人</strong><span>会议号 {{ groupNumber(meetingNumber) }}</span><button @click="emit('invite')">复制邀请</button></div></Transition>

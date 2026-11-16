@@ -502,7 +502,7 @@ span.line.rise { display: block; }
 
 .meeting-stage { position: relative; flex: 1; min-height: 320px; overflow: hidden; border-radius: 16px; background: #0d1624; }
 .conference-tiles {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(150px, 1fr);
+  position:relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(150px, 1fr);
   gap: 10px; height: 100%; padding: 10px; overflow: auto;
 }
 .conference-tiles.layout-1 { grid-template-columns: minmax(0, 1fr); }
@@ -519,6 +519,9 @@ span.line.rise { display: block; }
 }
 .conference-tile.speaking::after { opacity:.45; transform:scale(1); }
 .conference-tile.speaking-primary::after { opacity:1; }
+.tile-motion-move, .tile-motion-enter-active { transition:transform var(--motion-entrance) var(--motion-ease), opacity var(--motion-entrance) var(--motion-ease); }
+.tile-motion-leave-active { position:absolute; transition:transform var(--motion-exit) var(--motion-ease), opacity var(--motion-exit) var(--motion-ease); }
+.tile-motion-enter-from, .tile-motion-leave-to { opacity:0; transform:scale(.98); }
 .conference-tile.screen-share-tile { grid-column: 1 / -1; grid-row: span 2; min-height: 300px; background: #070c14; }
 .conference-tile.screen-share-tile video { object-fit: contain; }
 .stage-views { position:absolute; top:12px; right:12px; z-index:4; display:flex; gap:2px; padding:3px; border:1px solid var(--room-line); border-radius:9px; background:var(--room-panel); }
@@ -757,6 +760,8 @@ span.line.rise { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .tile-motion-move, .tile-motion-enter-active, .tile-motion-leave-active { transition:opacity var(--motion-instant) linear; }
+  .tile-motion-enter-from, .tile-motion-leave-to { transform:none; }
   .rise, .rise-stage, .hero-chat { animation: reduced-fade var(--motion-instant) ease both !important; }
   .join-plate.shake, .wave i, .loader { animation: none !important; }
   .hero-room { transform: none !important; }
