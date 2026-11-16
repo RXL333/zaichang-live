@@ -6,6 +6,7 @@ import MediaTile from './MediaTile.vue'
 import LogoMark from './LogoMark.vue'
 import { groupNumber } from '../format'
 import { connectionQualityLabel } from '../networkQuality'
+import { avatarStyle } from '../avatarColors'
 
 const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
 const emit=defineEmits(['invite'])
@@ -48,7 +49,7 @@ const tiles=computed(()=>{
         else if(!camera || isObs)camera=publication.track
       }
     }
-    people.push({key:`person-${member.userId}`,track:camera,name:member.nickname,microphone,obs,speaking,host:member.host,local:member.userId===props.userId,quality})
+    people.push({key:`person-${member.userId}`,userId:member.userId,track:camera,name:member.nickname,microphone,obs,speaking,host:member.host,local:member.userId===props.userId,quality})
   }
   return [...screens,...people]
 })
@@ -84,7 +85,7 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
       <div class="stage-views" aria-label="画面布局"><button :class="{active:view==='gallery'}" :aria-pressed="view==='gallery'" @click="setView('gallery')">画廊</button><button :class="{active:view==='speaker'}" :aria-pressed="view==='speaker'" @click="setView('speaker')">演讲者</button></div>
       <div class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}">
         <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
-          <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar">{{ tile.name?.slice(0,1) || '会' }}</div>
+          <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
           <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>
           <div v-if="tile.screen" class="tile-screen-label"><MonitorUp :size="14"/> {{ tile.name }}的屏幕</div><div v-else class="tile-name"><span>{{ tile.name }}{{ tile.local ? '（我）' : '' }}</span><span v-if="tile.host" class="tile-host">主持人</span><span v-if="tile.obs" class="tile-obs">OBS</span><Mic v-if="tile.microphone" :size="14"/><MicOff v-else class="mic-off" :size="14"/></div>

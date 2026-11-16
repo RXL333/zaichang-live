@@ -17,6 +17,7 @@ import { invitationText, meetingUrl } from '../invitation'
 import { loadDevicePreferences, supportsSpeakerSelection, useJoinDevices } from '../devicePreferences'
 import { useMeetingDevices } from '../useMeetingDevices'
 import { adjustVideoQuality } from '../networkQuality'
+import { avatarStyle } from '../avatarColors'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
@@ -171,7 +172,7 @@ async function device(kind){
 function sendChat(){
   const content=draft.value.trim();if(!content || connection.value!=='connected')return
   const clientId=globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  pending.value.push({client_id:clientId,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now()})
+  pending.value.push({client_id:clientId,user_id:user.current.id,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now()})
   if(socket?.send({type:'CHAT',clientId,content}))draft.value=''
 }
 function manage(type,target){
@@ -224,7 +225,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
           <button class="meeting-button conference-share" aria-label="邀请参会者" @click="inviteDialog=true"><Copy :size="15"/> <span>邀请</span></button>
           <button v-if="isHost" class="end-meeting" @click="confirmKind='end'">结束会议</button>
-          <button class="user-initial" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
+          <button class="user-initial" :style="avatarStyle(user.current.id)" :title="localMember?.nickname || meeting.nickname" aria-label="修改我的昵称" @click="openRename(localMember || {userId:user.current.id,nickname:meeting.nickname})">{{ (localMember?.nickname || meeting.nickname)?.slice(0,1) }}</button>
         </div>
       </header>
       <div v-if="connection==='reconnecting' || mediaState==='reconnecting'" class="connection-banner" role="status">正在重新连接，连接恢复后可继续发送消息。</div>
@@ -260,7 +261,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <div v-if="panel==='members'" class="members-panel">
             <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
             <div v-for="member in members" :key="member.userId" class="member-row">
-              <span class="member-avatar">{{ member.nickname?.slice(0,1) }}</span>
+              <span class="member-avatar" :style="avatarStyle(member.userId)">{{ member.nickname?.slice(0,1) }}</span>
               <div class="member-name"><strong>{{ member.nickname }}{{ member.userId===user.current.id ? '（我）' : '' }}</strong><small>{{ member.host ? '主持人' : '参会者' }} · {{ mediaState==='connected' ? (memberMedia[member.userId]?.publishing ? '推流中' : '未推流') : '音视频未连接' }}</small></div>
               <span class="member-mic" :class="{ on: mediaState==='connected' && memberMedia[member.userId]?.microphone }" :title="mediaState==='connected' ? (memberMedia[member.userId]?.microphone ? '麦克风开' : '麦克风关') : '麦克风状态未知'"><Mic v-if="mediaState==='connected' && memberMedia[member.userId]?.microphone" :size="16"/><MicOff v-else :size="16"/></span>
               <button v-if="isHost && member.userId!==user.current.id" class="member-menu-button" :aria-label="`管理 ${member.nickname}`" @click="menu=menu===member.userId ? '' : member.userId"><MoreHorizontal :size="19"/></button>
@@ -272,8 +273,8 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <template v-else>
             <div ref="chatList" class="conference-chat">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
-              <div v-for="message in messages" :key="message.id" class="conference-message"><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div>
-              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><div><strong>{{ message.nickname }}</strong><time>{{ message.failed ? '未发送，请稍后复制重试' : '发送中' }}</time></div><p>{{ message.content }}</p></div>
+              <div v-for="message in messages" :key="message.id" class="conference-message"><span class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div>
+              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><span class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong>{{ message.nickname }}</strong><time>{{ message.failed ? '未发送，请稍后复制重试' : '发送中' }}</time></div><p>{{ message.content }}</p></div>
             </div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>

@@ -621,7 +621,8 @@ span.line.rise { display: block; }
 .conference-chat { flex: 1; min-height: 0; padding: 6px 16px 12px; overflow: auto; }
 .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; min-height: 180px; color: var(--room-muted); font-size: 13px; text-align: center; }
 .chat-empty strong { color: var(--room-text); font-size: 14px; }
-.conference-message { margin-bottom: 18px; overflow-wrap: anywhere; }
+.conference-message { position:relative; min-height:30px; margin-bottom: 18px; padding-left:38px; overflow-wrap: anywhere; }
+.message-avatar { position:absolute; top:0; left:0; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; font-size:12px; font-weight:700; }
 .conference-message > div { display: flex; align-items: baseline; gap: 8px; }
 .conference-message strong { font-size: 13px; font-weight: 700; color: #a8d9c2; }
 .conference-message time { font-size: 12px; color: var(--room-muted); }
