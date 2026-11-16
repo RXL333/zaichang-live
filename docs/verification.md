@@ -13,6 +13,7 @@
 - 生产依赖审计 0 项漏洞；完整依赖审计仍报告 5 项中危和 2 项严重，CI 的高危失败门禁目前仅覆盖生产依赖，详情见 [安全核对](security-review.md)。
 - 对受 Git 跟踪的文本和前端构建产物检查 GitHub、OpenAI、AWS 密钥及 PostgreSQL 带密码连接串等有限模式，未发现匹配；这不是对所有可能凭据的完整审计。
 - 云端健康检查曾连续超时，触发 [启动会议服务工作流](https://github.com/RXL333/zaichang-live/actions/runs/43828493818) 后返回成功；随后本机健康接口返回 `status: OK`。没有测量完整唤醒耗时。
+- [第三阶段 CI](https://github.com/RXL333/zaichang-live/actions/runs/43829673211) 的前后端与浏览器检查通过；随后 Pages 发布被 Dependabot 拉取请求对应的跳过任务取消。已按触发事件和分支拆分发布并发组，修复后的线上发布以新一次运行结果为准。
 
 第二阶段，2026-11-16：
 

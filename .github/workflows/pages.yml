@@ -11,7 +11,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # A skipped PR workflow must not cancel a successful main-branch deployment.
+  group: pages-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
