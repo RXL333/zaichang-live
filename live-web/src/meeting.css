@@ -659,7 +659,11 @@ span.line.rise { display: block; }
 .conference-message strong { font-size: 13px; font-weight: 700; color: #a8d9c2; }
 .conference-message time { font-size: 12px; color: var(--room-muted); }
 .conference-message p { margin-top: 4px; font-size: 14px; line-height: 1.6; color: var(--room-text); }
-.conference-message.pending { opacity: .55; }
+.conference-message.grouped { margin-top:-12px; }
+.conference-message a { color:#93e8c1; text-decoration:underline; text-underline-offset:2px; }
+.conference-message.pending p { opacity:.75; }
+.retry-message { border:0; padding:0; background:none; color:#f3c779; font-size:12px; text-decoration:underline; }
+.chat-counter { padding:0 14px 5px; color:var(--room-muted); font-size:12px; text-align:right; }
 .conference-chat-form { display: flex; gap: 8px; margin: 0 12px 12px; padding: 6px 6px 6px 14px; border: 1px solid var(--room-line); border-radius: 12px; background: var(--room); }
 .conference-chat-form:focus-within { border-color: var(--presence-bright); }
 .conference-chat-form input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--room-text); font-size: 14px; }

@@ -18,6 +18,7 @@ import { loadDevicePreferences, supportsSpeakerSelection, useJoinDevices } from 
 import { useMeetingDevices } from '../useMeetingDevices'
 import { adjustVideoQuality } from '../networkQuality'
 import { avatarStyle } from '../avatarColors'
+import { groupChat } from '../chatText'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
@@ -32,9 +33,11 @@ const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 let touchStartY=null
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
+const pendingTimers=new Map()
 const enteredAt=Date.now()
 const isHost=computed(()=>meeting.value?.isOwner===true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
+const chatMessages=computed(()=>groupChat([...messages.value,...pending.value]))
 const connectionText=computed(()=>({connected:'连接正常',connecting:'正在连接',reconnecting:'正在重连',expired:'请重新加入',closed:'已断开'})[connection.value]||'连接中')
 const memberMedia=computed(()=>{
   mediaRevision.value
@@ -65,14 +68,23 @@ function swipeEnd(event,direction){
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function addMessage(message){if(!message?.id || messages.value.some(item=>item.id===message.id))return;messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq);nextTick(()=>{if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight})}
+function clearPendingTimer(id){clearTimeout(pendingTimers.get(id));pendingTimers.delete(id)}
+function sendPending(item){
+  clearPendingTimer(item.client_id)
+  if(!socket?.send({type:'CHAT',clientId:item.client_id,content:item.content})){item.failed=true;return false}
+  item.failed=false
+  pendingTimers.set(item.client_id,setTimeout(()=>{item.failed=true;pendingTimers.delete(item.client_id)},15000))
+  return true
+}
+function retryMessage(item){if(!item)return;if(connection.value!=='connected'){flash('连接已断开，请稍后重试');return}sendPending(item)}
 async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
 function handleEvent(event){
   if(event.type==='MEMBERS')members.value=event.members||[]
-  if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
+  if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event);clearPendingTimer(event.client_id);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
   if(event.type==='MUTED'){hostMuteRevision++;microphone.value=false;if(initialMedia)initialMedia.microphoneOn=false;if(restoreMedia)restoreMedia.microphoneOn=false;flash(event.message);muteFeedback.value=false;nextTick(()=>muteFeedback.value=true)}
   if(event.type==='NOTICE')flash(event.message)
   if(event.type==='ERROR'){
-    if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed)failed.failed=true}
+    if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed){failed.failed=true;clearPendingTimer(failed.client_id)}}
     flash(event.message);if(connection.value==='expired'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
   }
   if(event.type==='KICKED'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
@@ -83,7 +95,7 @@ function showEnded(meetingEnded=false){
 }
 function connectSocket(){
   socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
-    await history();for(const item of pending.value.filter(item=>!item.failed))socket?.send({type:'CHAT',clientId:item.client_id,content:item.content})
+    await history();for(const item of pending.value.filter(item=>!item.failed))sendPending(item)
   }})
 }
 async function connectMedia(){
@@ -178,8 +190,8 @@ async function device(kind){
 function sendChat(){
   const content=draft.value.trim();if(!content || connection.value!=='connected')return
   const clientId=globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  pending.value.push({client_id:clientId,user_id:user.current.id,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now()})
-  if(socket?.send({type:'CHAT',clientId,content}))draft.value=''
+  pending.value.push({client_id:clientId,user_id:user.current.id,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now(),isPending:true})
+  sendPending(pending.value[pending.value.length-1]);draft.value=''
 }
 function manage(type,target){
   if(type==='KICK'){confirmTarget.value=target;confirmKind.value='kick';return}
@@ -214,7 +226,7 @@ async function confirmAction(){
 }
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
 onMounted(load)
-onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);socket?.close();room.value?.disconnect()})
+onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
 </script>
 <template>
   <main class="conference-page">
@@ -279,9 +291,9 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);so
           <template v-else>
             <div ref="chatList" class="conference-chat">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
-              <div v-for="message in messages" :key="message.id" class="conference-message"><span class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong>{{ message.nickname }}</strong><time>{{ time(message.created_at) }}</time></div><p>{{ message.content }}</p></div>
-              <div v-for="message in pending" :key="message.client_id" class="conference-message pending"><span class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong>{{ message.nickname }}</strong><time>{{ message.failed ? '未发送，请稍后复制重试' : '发送中' }}</time></div><p>{{ message.content }}</p></div>
+              <div v-for="message in chatMessages" :key="message.id || message.client_id" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div>
             </div>
+            <div v-if="draft.length>=900" class="chat-counter" aria-live="polite">还可输入 {{ 1000-draft.length }} 字</div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>
         </aside>
