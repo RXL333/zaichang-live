@@ -130,6 +130,17 @@ it('does not override a host mute received while a microphone is starting',async
   wrapper.unmount()
 })
 
+it('gives a non-blocking notification when the host mutes the microphone',async()=>{
+  const wrapper=mount(MeetingRoomView,{global:{stubs:{MeetingMedia:true,LogoMark:true}}})
+  await vi.waitFor(()=>expect(wrapper.find('[aria-label="开启麦克风"]').exists()).toBe(true))
+  socketMock.onEvent({type:'MUTED',message:'主持人已将你静音'})
+  await wrapper.vm.$nextTick();await wrapper.vm.$nextTick()
+  expect(wrapper.text()).toContain('主持人已将你静音')
+  expect(wrapper.get('[aria-label="开启麦克风"]').classes()).toContain('mute-feedback')
+  expect(wrapper.get('[aria-label="开启麦克风"]').element.disabled).toBe(false)
+  wrapper.unmount()
+})
+
 it('turns off a camera request that finishes after removal from the meeting',async()=>{
   let finishCamera
   socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())

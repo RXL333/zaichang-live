@@ -588,6 +588,15 @@ span.line.rise { display: block; }
   border: 0; background: transparent; color: var(--room-muted); font-size: 12px;
 }
 .meeting-control svg { box-sizing: content-box; padding: 14px; border-radius: 50%; background: var(--room-raise); color: var(--room-text); }
+.control-symbol { position:relative; display:grid; place-items:center; width:48px; height:48px; }
+.control-symbol svg { grid-area:1 / 1; }
+.control-icon-enter-active, .control-icon-leave-active { transition:opacity var(--motion-instant) linear; }
+.control-icon-enter-from, .control-icon-leave-to { opacity:0; }
+.meeting-control:active:not(:disabled) .control-symbol { transform:scale(.94); }
+.control-symbol { transition:transform var(--motion-instant) var(--motion-ease); }
+.sharing-dot { position:absolute; right:2px; top:2px; width:9px; height:9px; border:2px solid var(--room); border-radius:50%; background:var(--presence-bright); }
+.meeting-control.mute-feedback .control-symbol { animation:mute-nudge var(--motion-entrance) var(--motion-ease); }
+@keyframes mute-nudge { 25% { transform:translateX(-3px); } 55% { transform:translateX(3px); } 100% { transform:none; } }
 .meeting-control:hover:not(:disabled) svg { background: #26395a; }
 .meeting-control.enabled svg { background: #e8edf4; color: var(--ink); }
 .meeting-control.enabled:hover:not(:disabled) svg { background: #fff; }
@@ -701,6 +710,7 @@ span.line.rise { display: block; }
   .inside-meeting .toast { bottom: 112px; }
   .meeting-control { min-width: 56px; font-size: 11px; }
   .meeting-control svg { padding: 11px; }
+  .control-symbol { width:42px; height:42px; }
 }
 
 @media (max-width: 760px) {
@@ -755,11 +765,14 @@ span.line.rise { display: block; }
   .conference-toolbar { padding:4px 8px calc(4px + env(safe-area-inset-bottom)); }
   .meeting-control { gap:2px; }
   .meeting-control svg { padding:7px; }
+  .control-symbol { width:34px; height:34px; }
   .meeting-stage .conference-tiles { padding-top:42px; padding-bottom:34px; }
   .conference-side { height:85dvh; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .meeting-control.mute-feedback .control-symbol { animation:none; }
+  .meeting-control:active:not(:disabled) .control-symbol { transform:none; }
   .tile-motion-move, .tile-motion-enter-active, .tile-motion-leave-active { transition:opacity var(--motion-instant) linear; }
   .tile-motion-enter-from, .tile-motion-leave-to { transform:none; }
   .rise, .rise-stage, .hero-chat { animation: reduced-fade var(--motion-instant) ease both !important; }
