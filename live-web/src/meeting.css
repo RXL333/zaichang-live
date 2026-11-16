@@ -71,6 +71,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .page-enter-active { transition:opacity var(--motion-transition) var(--motion-ease); }
 .page-leave-active { transition:opacity var(--motion-exit) var(--motion-ease); }
 .page-enter-from, .page-leave-to { opacity:0; }
+html.shared-number-transition .page-enter-active, html.shared-number-transition .page-leave-active, .inside-meeting .page-enter-active, .inside-meeting .page-leave-active, .conference-page.page-leave-active { transition:none; }
 html.shared-number-transition .join-plate input, html.shared-number-transition .join-intro .room-number { view-transition-name:meeting-number; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration:var(--motion-transition); }
 ::view-transition-group(meeting-number) { animation-duration:var(--motion-transition); animation-timing-function:var(--motion-ease); }
