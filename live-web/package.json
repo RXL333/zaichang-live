@@ -11,7 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "livekit-client": "^2.16.1",
+    "livekit-client": "^2.24.0",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^3.0.3",
     "uqr": "^0.1.3",
