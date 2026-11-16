@@ -253,14 +253,15 @@ async function confirmAction(){
 }
 function time(value){return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit'}).format(value)}
 function onShortcut(event){
+  const target=event.target
+  const typing=!!target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
   if(event.key==='Escape'){
     if(shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value)return
+    if(typing)return
     if(sideOpen.value)closePanel();else if(panel.value==='chat')panel.value='members'
     deviceMenu.value='';menu.value='';moreOpen.value=false;return
   }
-  if(!meeting.value || fatal.value || event.ctrlKey || event.metaKey || event.altKey || event.repeat || shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value)return
-  const target=event.target
-  if(target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))return
+  if(!meeting.value || fatal.value || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.repeat || shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value || typing)return
   const key=event.key.toLowerCase()
   if(key==='?'){event.preventDefault();shortcutsDialog.value=true;return}
   if(key==='c'){event.preventDefault();openPanel('chat');return}
