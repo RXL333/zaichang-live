@@ -27,6 +27,8 @@ jobs:
           cache: npm
           cache-dependency-path: live-web/package-lock.json
       - run: npm ci
+      # Test tooling has known advisories that require major upgrades; see docs/security-review.md.
+      - run: npm audit --registry=https://registry.npmjs.org --omit=dev --audit-level=high
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium

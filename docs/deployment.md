@@ -21,6 +21,8 @@ cd /data/zaichang-live/app
 
 推送 `main` 后，GitHub Actions 先并行运行前后端测试；仅当该提交的 CI 全部通过、且它仍是最新 `main` 提交时，才构建并发布 `live-web/dist`。GitHub Pages 使用 `/zaichang-live/` 子路径和哈希路由；媒体和业务请求通过 HTTPS/WSS 连接 InstaBox。环境变量中的后端地址改变时，同步更新 `.github/workflows/pages.yml` 和 `compose.instabox.yaml` 的允许来源。
 
+前端 `index.html` 的内容安全策略允许当前 InstaBox 和 LiveKit Cloud 域名以及本地开发连接。若更换后端或媒体服务域名，需要一并更新 `connect-src`，并实际验证会议连接。`style-src` 保留内联样式以支持 Vue 的动态布局；媒体权限和账号仍由后端控制。
+
 门禁验证方式：在测试分支创建包含故意失败测试的 PR，确认 CI 显示失败且没有触发 Pages 发布；移除故障后再合并。不要在 `main` 故意制造失败。该失败分支验证目前尚未执行。
 
 ## 会议与 OBS

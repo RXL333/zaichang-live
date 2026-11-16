@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /live-web
+    schedule:
+      interval: weekly
+  - package-ecosystem: maven
+    directory: /live-server
+    schedule:
+      interval: weekly

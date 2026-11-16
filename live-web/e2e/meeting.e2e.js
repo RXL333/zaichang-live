@@ -18,7 +18,7 @@ async function mockBackend(page){
     else if(path.endsWith('/messages'))data=[]
     else if(path.endsWith('/obs'))data={ok:true}
     else {status=404;data={message:'未找到'}}
-    await route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)})
+    await route.fulfill({status,headers:{'Access-Control-Allow-Origin':'*'},contentType:'application/json',body:JSON.stringify(data)})
   })
   await page.route('**/node_modules/.vite/deps/livekit-client.js*',route=>route.fulfill({path:fileURLToPath(new URL('./fake-livekit.js',import.meta.url)),contentType:'text/javascript'}))
   await page.routeWebSocket('**/ws/meetings',socket=>{
@@ -71,4 +71,17 @@ test('meeting number, join validation and keyboard meeting flow',async({page})=>
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/ended\/123456789/)
   await expect(page.getByText('已离开会议')).toBeVisible()
+})
+
+test('content security policy permits the configured backend and LiveKit origins',async({page})=>{
+  await page.addInitScript(()=>{window.cspViolations=[];document.addEventListener('securitypolicyviolation',event=>window.cspViolations.push(event.blockedURI))})
+  await mockBackend(page)
+  await page.routeWebSocket('wss://zaichang-live-jiydhuos.livekit.cloud/**',()=>{})
+  await page.goto('/')
+  const result=await page.evaluate(async()=>{
+    const health=await fetch('https://18080-agq4iihhd6ie55qjpl2ezecsrm.instabox.tech/api/system/status').then(response=>response.json())
+    const socket=await new Promise(resolve=>{const ws=new WebSocket('wss://zaichang-live-jiydhuos.livekit.cloud/rtc');ws.onopen=()=>{ws.close();resolve(true)};ws.onerror=()=>resolve(false);setTimeout(()=>resolve(false),3000)})
+    return {health:health.status,socket,violations:window.cspViolations}
+  })
+  expect(result).toEqual({health:'OK',socket:true,violations:[]})
 })
