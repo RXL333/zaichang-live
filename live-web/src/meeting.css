@@ -381,6 +381,16 @@ span.line.rise { display: block; }
 .meeting-lock { display: inline-flex; align-items: center; gap: 4px; }
 .ended-label { padding: 2px 8px; border-radius: 99px; background: #e7ebea; color: var(--slate); font-size: 12px; font-weight: 600; }
 .meeting-row-actions { display: flex; align-items: center; gap: 4px; }
+.meeting-state { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; color:var(--presence-dark); font-size:12px; font-weight:600; }
+.meeting-state i { width:7px; height:7px; border-radius:50%; background:var(--presence); }
+.meeting-state.ended { color:var(--slate-soft); }
+.meeting-state.ended i { background:var(--slate-soft); }
+.meeting-skeleton .meeting-list-row { min-height:87px; pointer-events:none; }
+.meeting-skeleton .skeleton-block, .skeleton-line, .skeleton-action { display:block; background:#e0e7e4; }
+.skeleton-line { height:14px; border-radius:5px; }
+.skeleton-title { width: min(155px, 70%); }
+.skeleton-meta { width:min(230px, 90%); height:12px; margin-top:12px; }
+.skeleton-action { width:180px; height:36px; border-radius:8px; }
 .row-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--slate); }
 .row-icon:hover { background: #e4ebe8; color: var(--ink); }
 .row-icon.copied { background: var(--presence-wash); color: var(--presence-dark); }

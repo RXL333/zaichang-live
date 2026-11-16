@@ -45,9 +45,22 @@ describe('meeting home',()=>{
     api.mockResolvedValue([{id:'1',number:'123456789',title:'项目会议',status:'OPEN',createdAt:Date.now()}])
     const wrapper=mount(MeetingHomeView,{global:{stubs:{teleport:true}}})
     expect(api).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.meeting-skeleton .meeting-list-row')).toHaveLength(3)
     service.status='ready'
     await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
     expect(api).toHaveBeenCalledWith('/api/meetings')
+    wrapper.unmount()
+  })
+  it('shows meeting state and only offers entry for open meetings',async()=>{
+    const user=useUser(),service=useServiceHealth()
+    user.current={id:'user-1'};service.status='ready'
+    api.mockResolvedValue([{id:'1',number:'123456789',title:'周会',status:'OPEN',createdAt:Date.now()},{id:'2',number:'987654321',title:'旧会议',status:'ENDED',createdAt:Date.now()}])
+    const wrapper=mount(MeetingHomeView)
+    await vi.waitFor(()=>expect(wrapper.findAll('article.meeting-list-row')).toHaveLength(2))
+    const rows=wrapper.findAll('article.meeting-list-row')
+    expect(rows[0].text()).toContain('进行中')
+    expect(rows[1].text()).toContain('已结束')
+    expect(rows[1].text()).not.toContain('进入会议')
     wrapper.unmount()
   })
   it('does not delete a meeting until its confirmation is accepted',async()=>{
