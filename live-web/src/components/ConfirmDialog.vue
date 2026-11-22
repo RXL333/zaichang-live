@@ -2,7 +2,11 @@
 import { useId } from 'vue'
 import ModalDialog from './ModalDialog.vue'
 
-defineProps({ open: Boolean, title: String, description: String, confirmText: { type: String, default: '确认' }, busy: Boolean })
+defineProps({
+  open: Boolean, title: String, description: String,
+  confirmText: { type: String, default: '确认' },
+  busy: Boolean, destructive: { type: Boolean, default: true },
+})
 const emit = defineEmits(['close', 'confirm'])
 const titleId = useId(), descriptionId = useId()
 </script>
@@ -13,7 +17,7 @@ const titleId = useId(), descriptionId = useId()
     <p :id="descriptionId" class="muted">{{ description }}</p>
     <div class="confirm-actions">
       <button type="button" class="meeting-button outline confirm-cancel" :disabled="busy" @click="emit('close')">取消</button>
-      <button type="button" class="meeting-button destructive" :disabled="busy" @click="emit('confirm')">{{ busy ? '正在处理…' : confirmText }}</button>
+      <button type="button" class="meeting-button" :class="destructive ? 'destructive' : 'primary'" :disabled="busy" @click="emit('confirm')">{{ busy ? '正在处理…' : confirmText }}</button>
     </div>
   </ModalDialog>
 </template>

@@ -496,6 +496,7 @@ span.line.rise { display: block; }
 .conference-title small { margin-top: 2px; font-size: 12px; color: var(--room-muted); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 
 .conference-header-right { display: flex; align-items: center; gap: 14px; }
+.conference-lock { display:inline-flex; align-items:center; gap:5px; color:#e2b663; font-size:12px; white-space:nowrap; }
 .connection-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: #e2b663; white-space: nowrap; }
 .connection-status i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .connection-status.connected { color: var(--presence-bright); }
@@ -643,6 +644,13 @@ span.line.rise { display: block; }
 
 .members-panel { flex: 1; min-height: 0; padding: 4px 12px 14px; overflow: auto; }
 .side-caption { display: flex; justify-content: space-between; gap: 8px; padding: 6px 6px 10px; font-size: 12px; color: var(--room-muted); }
+.host-controls { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 12px; }
+.host-controls button {
+  display:flex; align-items:center; justify-content:center; gap:7px; min-height:42px; padding:6px;
+  border:1px solid var(--room-line); border-radius:9px; background:var(--room); color:var(--room-text);
+  font-size:13px; font-weight:600;
+}
+.host-controls button:hover:not(:disabled) { background:var(--room-raise); }
 .member-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 9px 6px; border-radius: 10px; }
 .member-row:hover { background: rgba(255, 255, 255, .04); }
 .member-name { flex: 1; min-width: 0; }
@@ -776,7 +784,7 @@ span.line.rise { display: block; }
 
   .conference-header { padding: 0 10px; }
   .conference-title .logo-mark, .conference-header-right .user-initial { display:none; }
-  .connection-text, .conference-share span { display: none; }
+  .connection-text, .conference-share span, .conference-lock span { display: none; }
   .conference-header-right { gap: 8px; }
   .tile-avatar { width: 64px; height: 64px; font-size: 25px; }
   .conference-tiles.layout-4, .conference-tiles.layout-6, .conference-tiles.layout-9, .stage-screen .conference-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -12,15 +12,26 @@ public class MeetingController {
     @GetMapping public List<Map<String,Object>> mine(HttpSession session){return meetings.mine(db.requireUser(session));}
     @PostMapping public Map<String,Object> create(@RequestBody Map<String,Object> input,HttpSession session){return meetings.create(db.requireUser(session),input);}
     @GetMapping("/{number}") public Map<String,Object> info(@PathVariable String number,HttpSession session){
-        return meetings.publicInfo(meetings.byNumber(number),(String)session.getAttribute("userId"));
+        var meeting = meetings.byNumber(number);
+        var result = meetings.publicInfo(meeting, (String) session.getAttribute("userId"));
+        result.put("canRejoinLockedMeeting", meetings.canRejoinLockedMeeting(meeting, session));
+        return result;
     }
     @PatchMapping("/{number}") public Map<String,Object> update(@PathVariable String number,@RequestBody Map<String,Object> input,HttpSession session){
-        var updated=meetings.update(number,db.requireUser(session),input);sockets.meetingChanged(updated.get("id").toString());return updated;
+        String id = meetings.byNumber(number).get("id").toString();
+        synchronized (locks.meeting(id)) {
+            var updated = meetings.update(number, db.requireUser(session), input);
+            sockets.meetingChanged(id);
+            return updated;
+        }
     }
     @PostMapping("/{number}/join") public Map<String,Object> join(@PathVariable String number,@RequestBody Map<String,Object> input,HttpSession session){return meetings.join(number,session,input);}
     @GetMapping("/{number}/state") public Map<String,Object> state(@PathVariable String number,HttpSession session){
         var meeting=meetings.byNumber(number);var member=meetings.requireGrant(meeting,session);
-        var result=new LinkedHashMap<>(meetings.publicInfo(meeting,db.requireUser(session)));result.put("nickname",member.get("nickname"));return result;
+        var result = meetings.publicInfo(meeting, db.requireUser(session));
+        result.put("nickname", member.get("nickname"));
+        result.put("hostUserId", MeetingService.hostId(meeting));
+        return result;
     }
     @GetMapping("/{number}/messages") public List<Map<String,Object>> messages(@PathVariable String number,HttpSession session){
         var meeting=meetings.byNumber(number);meetings.requireGrant(meeting,session);return meetings.messages(meeting.get("id").toString());
@@ -42,7 +53,9 @@ public class MeetingController {
     }
     @PostMapping("/{number}/end") public Map<String,Boolean> end(@PathVariable String number,HttpSession session){
         String id=meetings.byNumber(number).get("id").toString();synchronized(locks.meeting(id)){
-            var meeting=meetings.byNumber(number);meetings.requireOwner(meeting,db.requireUser(session));meetings.requireOpen(meeting);
+            var meeting = meetings.byNumber(number);
+            meetings.requireGrant(meeting, session);
+            meetings.requireHost(meeting, db.requireUser(session));
             media.close(id);meetings.finish(meeting,"ENDED");sockets.meetingEnded(id);return Map.of("ok",true);
         }
     }

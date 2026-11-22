@@ -50,6 +50,20 @@ it('offers login before showing the join form',async()=>{
   wrapper.unmount()
 })
 
+it('lets the same authorized session return to a locked meeting without a password', async () => {
+  useServiceHealth().status = 'ready'
+  useUser().current = { id: 'user-1', nickname: '参会者' }
+  api.mockResolvedValue({ title: '项目会议', status: 'OPEN', locked: true, canRejoinLockedMeeting: true, hasPassword: true })
+  const wrapper = mount(MeetingJoinView, { global: { stubs: { RouterLink: true } } })
+  await vi.waitFor(() => expect(wrapper.text()).toContain('你仍可重新加入'))
+  expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+  await wrapper.get('form').trigger('submit')
+  expect(api).toHaveBeenCalledWith('/api/meetings/123456789/join', {
+    method: 'POST', body: { nickname: '参会者', password: '' },
+  })
+  wrapper.unmount()
+})
+
 it('explains a service startup timeout and offers a retry',async()=>{
   useServiceHealth().status='timeout'
   const wrapper=mount(MeetingJoinView,{global:{stubs:{RouterLink:true}}})

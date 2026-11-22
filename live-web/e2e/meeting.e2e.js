@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 const meeting={number:'123456789',title:'测试会议',ownerName:'主持人',status:'OPEN',hasPassword:true,isOwner:false}
 
-async function mockBackend(page){
+async function mockBackend(page,{hostControls=false}={}){
   await page.route('**/api/**',async route=>{
     const url=new URL(route.request().url()),path=url.pathname,method=route.request().method()
     let status=200,data={}
@@ -13,7 +13,7 @@ async function mockBackend(page){
     else if(path==='/api/meetings')data=[]
     else if(path==='/api/meetings/123456789' && method==='GET')data=meeting
     else if(path.endsWith('/join'))data={ok:true}
-    else if(path.endsWith('/state'))data={...meeting,nickname:'测试成员'}
+    else if(path.endsWith('/state'))data={...meeting,nickname:'测试成员',...(hostControls ? {isOwner:true,hostUserId:'user-1',locked:false} : {})}
     else if(path.endsWith('/media-token'))data={url:'wss://example.invalid',token:'test-only'}
     else if(path.endsWith('/messages'))data=[]
     else if(path.endsWith('/obs'))data={ok:true}
@@ -25,9 +25,12 @@ async function mockBackend(page){
     socket.onMessage(raw=>{
       const event=JSON.parse(raw)
       if(event.type==='JOIN'){
-        socket.send(JSON.stringify({type:'JOINED'}))
-        socket.send(JSON.stringify({type:'MEMBERS',members:[{userId:'user-1',nickname:'测试成员',host:false}]}))
+        socket.send(JSON.stringify({type:'JOINED',...(hostControls ? {hostUserId:'user-1',locked:false} : {})}))
+        const members=[{userId:'user-1',nickname:'测试成员',host:hostControls}]
+        if(hostControls)members.push({userId:'user-2',nickname:'同事',host:false})
+        socket.send(JSON.stringify({type:'MEMBERS',members}))
       }
+      if(event.type==='SET_MEETING_LOCK' && hostControls)socket.send(JSON.stringify({type:'MEETING_LOCK_CHANGED',locked:event.locked}))
       if(event.type==='CHAT')socket.send(JSON.stringify({type:'CHAT_ACK',id:'message-1',seq:1,user_id:'user-1',nickname:'测试成员',client_id:event.clientId,content:event.content,created_at:Date.now()}))
     })
   })
@@ -96,6 +99,24 @@ test('content security policy permits the configured backend and LiveKit origins
     return {health:health.status,socket,violations:window.cspViolations}
   })
   expect(result).toEqual({health:'OK',socket:true,violations:[]})
+})
+
+test('the mobile members panel can lock and unlock the meeting', async ({page}) => {
+  await page.setViewportSize({width:375,height:667})
+  await mockBackend(page,{hostControls:true})
+  await page.goto('/join/123456789')
+  await page.getByLabel('会议密码').fill('1234')
+  await page.getByRole('button',{name:'加入会议'}).click()
+  await page.getByRole('button',{name:'更多会议功能'}).click()
+  await page.getByRole('button',{name:'成员（2）'}).click()
+  const actions=page.getByRole('group',{name:'主持人操作'})
+  await expect(actions.getByRole('button',{name:'全员静音'})).toBeEnabled()
+  await actions.getByRole('button',{name:'锁定会议'}).click()
+  await page.getByRole('dialog',{name:'锁定会议'}).getByRole('button',{name:'锁定会议'}).click()
+  await expect(page.getByRole('img',{name:'会议已锁定'})).toBeVisible()
+  if(process.env.HOST_CONTROLS_SCREENSHOT) await page.screenshot({path:'../output/host-controls-mobile.png'})
+  await actions.getByRole('button',{name:'解锁会议'}).click()
+  await expect(page.getByRole('img',{name:'会议已锁定'})).toHaveCount(0)
 })
 
 for(const viewport of [{width:375,height:667},{width:667,height:375},{width:1280,height:800}]){

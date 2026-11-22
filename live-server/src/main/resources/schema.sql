@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS meetings (
  password_hash VARCHAR(100), status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
  created_at BIGINT NOT NULL, ended_at BIGINT, chat_seq BIGINT NOT NULL DEFAULT 0
 );
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS host_user_id VARCHAR(40) REFERENCES app_users(id);
 CREATE INDEX IF NOT EXISTS idx_meetings_owner ON meetings(owner_id, created_at);
 CREATE TABLE IF NOT EXISTS meeting_members (
  meeting_id VARCHAR(40) NOT NULL REFERENCES meetings(id),

@@ -13,15 +13,17 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
     "spring.datasource.url=jdbc:h2:mem:meeting_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-    "spring.sql.init.mode=always","app.public-origin=https://pages.example"
+    "spring.sql.init.mode=always","app.public-origin=https://pages.example","meeting.host-reconnect-delay-ms=3000"
 })
 class MeetingIntegrationTest {
     @LocalServerPort int port;
     @Autowired ObjectMapper mapper;
     @Autowired Db db;
+    @Autowired SessionLocks locks;
     @MockitoBean MeetingMediaService media;
     final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     record User(String token,String csrf,String id){}
@@ -36,10 +38,15 @@ class MeetingIntegrationTest {
     String json(Object value){return mapper.writeValueAsString(value);}
     @SuppressWarnings("unchecked") Map<String,Object> object(String json){return mapper.readValue(json,Map.class);}
     User register() throws Exception {
-        var initial=request("GET","/api/csrf",null,null);
-        String token=initial.headers().firstValue("X-Auth-Token").orElseThrow(),csrf=object(initial.body()).get("token").toString();
         String username="m"+UUID.randomUUID().toString().replace("-","").substring(0,12);
-        var response=request("POST","/api/auth/register",new User(token,csrf,""),json(Map.of("username",username,"password","test-password","nickname",username)));
+        return authenticate("register", username);
+    }
+    User authenticate(String mode, String username) throws Exception {
+        var initial = request("GET", "/api/csrf", null, null);
+        String token = initial.headers().firstValue("X-Auth-Token").orElseThrow();
+        String csrf = object(initial.body()).get("token").toString();
+        var response = request("POST", "/api/auth/" + mode, new User(token, csrf, ""),
+            json(Map.of("username", username, "password", "test-password", "nickname", username)));
         assertEquals(200,response.statusCode(),response.body());
         var data=object(response.body());String id=((Map<?,?>)data.get("user")).get("id").toString();
         return new User(response.headers().firstValue("X-Auth-Token").orElseThrow(),csrf,id);
@@ -59,6 +66,172 @@ class MeetingIntegrationTest {
     boolean waitFor(BlockingQueue<String> events,String text,long timeoutMs) throws InterruptedException {
         long end=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         while(System.nanoTime()<end){String value=events.poll(100,TimeUnit.MILLISECONDS);if(value!=null && value.contains(text))return true;}return false;
+    }
+
+    String createMeeting(User owner, String password) throws Exception {
+        var response = request("POST", "/api/meetings", owner, json(Map.of("title", "会议管理验收", "password", password)));
+        assertEquals(200, response.statusCode(), response.body());
+        return object(response.body()).get("number").toString();
+    }
+    HttpResponse<String> join(User user, String number, String password) throws Exception {
+        return request("POST", "/api/meetings/" + number + "/join", user, json(Map.of("password", password)));
+    }
+    void send(Socket socket, Map<String,?> action) {
+        socket.socket().sendText(json(action), true).join();
+    }
+    Map<String,Object> receive(Socket socket, String type) throws Exception {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(7);
+        while (System.nanoTime() < end) {
+            String event = socket.events().poll(100, TimeUnit.MILLISECONDS);
+            if (event != null) {
+                var data = object(event);
+                if (type.equals(data.get("type"))) return data;
+            }
+        }
+        throw new AssertionError("未收到事件 " + type);
+    }
+    void close(Socket... sockets) {
+        for (var socket : sockets) {
+            if (!socket.socket().isOutputClosed()) socket.socket().sendClose(WebSocket.NORMAL_CLOSURE, "离开").join();
+        }
+    }
+
+    @Test void onlyCurrentHostControlsTheRoomAndTransferKeepsOwnership() throws Exception {
+        User owner = register(), member = register(), outsider = register();
+        String number = createMeeting(owner, ""), otherNumber = createMeeting(outsider, "");
+        assertEquals(200, join(owner, number, "").statusCode());
+        assertEquals(200, join(member, number, "").statusCode());
+        assertEquals(200, join(outsider, otherNumber, "").statusCode());
+        Socket host = socket(owner, number), guest = socket(member, number), other = socket(outsider, otherNumber);
+        try {
+            for (Map<String,?> request : List.<Map<String,?>>of(
+                Map.of("type", "SET_MEETING_LOCK", "locked", true),
+                Map.of("type", "MUTE_ALL"),
+                Map.of("type", "TRANSFER_HOST", "userId", owner.id()))) {
+                send(guest, request);
+                assertEquals(403, receive(guest, "ERROR").get("code"));
+            }
+            send(host, Map.of("type", "TRANSFER_HOST", "userId", outsider.id()));
+            assertEquals(409, receive(host, "ERROR").get("code"));
+            send(host, Map.of("type", "TRANSFER_HOST", "userId", member.id()));
+            assertEquals(member.id(), receive(host, "HOST_CHANGED").get("hostUserId"));
+            assertEquals(member.id(), receive(guest, "HOST_CHANGED").get("hostUserId"));
+            assertFalse(waitFor(other.events(), "HOST_CHANGED", 300));
+
+            String base = "/api/meetings/" + number;
+            var info = object(request("GET", base + "/state", owner, null).body());
+            assertEquals(true, info.get("isOwner"));
+            assertEquals(member.id(), info.get("hostUserId"));
+            assertEquals(200, request("PATCH", base, owner, json(Map.of("title", "已修改"))).statusCode());
+            assertEquals(403, request("DELETE", base, member, null).statusCode());
+            send(host, Map.of("type", "KICK", "userId", member.id()));
+            assertEquals(403, receive(host, "ERROR").get("code"));
+            assertEquals(403, request("POST", base + "/end", owner, null).statusCode());
+            assertEquals(200, request("POST", base + "/end", member, null).statusCode());
+            receive(host, "ENDED");
+        } finally { close(host, guest, other); }
+    }
+
+    @Test void lockingAdmitsOnlyPreviouslyAuthorizedSessions() throws Exception {
+        User owner = register(), member = register();
+        User freshSession = authenticate("login", db.user(member.id()).get("username").toString());
+        String number = createMeeting(owner, "1234"), base = "/api/meetings/" + number;
+        assertEquals(200, join(owner, number, "").statusCode());
+        assertEquals(200, join(member, number, "1234").statusCode());
+        Socket host = socket(owner, number);
+        try {
+            send(host, Map.of("type", "SET_MEETING_LOCK", "locked", true));
+            assertEquals(true, receive(host, "MEETING_LOCK_CHANGED").get("locked"));
+            var info = object(request("GET", base, member, null).body());
+            assertEquals(true, info.get("locked"));
+            assertEquals(true, info.get("canRejoinLockedMeeting"));
+            assertEquals(false, object(request("GET", base, freshSession, null).body()).get("canRejoinLockedMeeting"));
+            assertEquals(423, join(freshSession, number, "1234").statusCode());
+            assertEquals(200, join(member, number, "").statusCode());
+
+            Socket rejoined = socket(member, number);
+            try {
+                send(host, Map.of("type", "KICK", "userId", member.id()));
+                receive(rejoined, "KICKED");
+                assertEquals(false, object(request("GET", base, member, null).body()).get("canRejoinLockedMeeting"));
+                assertEquals(423, join(member, number, "1234").statusCode());
+            } finally { close(rejoined); }
+
+            send(host, Map.of("type", "SET_MEETING_LOCK", "locked", false));
+            assertEquals(false, receive(host, "MEETING_LOCK_CHANGED").get("locked"));
+            assertEquals(403, join(freshSession, number, "wrong").statusCode());
+            assertEquals(200, join(freshSession, number, "1234").statusCode());
+        } finally { close(host); }
+    }
+
+    @Test void lockAndConcurrentJoinUseTheSameMeetingState() throws Exception {
+        User owner = register(), newcomer = register();
+        String number = createMeeting(owner, "");
+        String id = db.one("SELECT id FROM meetings WHERE meeting_number=?", number).get("id").toString();
+        assertEquals(200, join(owner, number, "").statusCode());
+        Socket host = socket(owner, number);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<HttpResponse<String>> result;
+            synchronized (locks.meeting(id)) {
+                result = executor.submit(() -> join(newcomer, number, ""));
+                send(host, Map.of("type", "SET_MEETING_LOCK", "locked", true));
+            }
+            receive(host, "MEETING_LOCK_CHANGED");
+            int status = result.get(10, TimeUnit.SECONDS).statusCode();
+            assertTrue(status == 200 || status == 423);
+            var lockedInfo = object(request("GET", "/api/meetings/" + number, newcomer, null).body());
+            assertEquals(status == 200, lockedInfo.get("canRejoinLockedMeeting"));
+            assertEquals(status, join(newcomer, number, "").statusCode());
+        } finally {
+            executor.shutdownNow();
+            close(host);
+        }
+    }
+
+    @Test void lastHostConnectionCanReconnectBeforePassingControlToEarliestMember() throws Exception {
+        User owner = register(), first = register(), second = register();
+        String number = createMeeting(owner, "");
+        for (User user : List.of(owner, first, second)) assertEquals(200, join(user, number, "").statusCode());
+        Socket host = socket(owner, number), extraHostTab = socket(owner, number);
+        Socket guest = socket(first, number), other = socket(second, number);
+        try {
+            close(host);
+            send(extraHostTab, Map.of("type", "SET_MEETING_LOCK", "locked", true));
+            receive(extraHostTab, "MEETING_LOCK_CHANGED");
+            assertFalse(waitFor(guest.events(), "HOST_CHANGED", 3200));
+
+            close(extraHostTab);
+            // Observe the host disappearing before exercising the reconnect window.
+            assertTrue(waitFor(guest.events(), "\"host\":false", 3000));
+            Socket returned = socket(owner, number);
+            try {
+                assertFalse(waitFor(guest.events(), "HOST_CHANGED", 3200));
+                close(returned);
+                assertEquals(first.id(), receive(guest, "HOST_CHANGED").get("hostUserId"));
+                assertEquals(first.id(), receive(other, "HOST_CHANGED").get("hostUserId"));
+            } finally { close(returned); }
+        } finally { close(host, extraHostTab, guest, other); }
+    }
+
+    @Test void muteAllTargetsOtherInRoomAccountsOnceAndReportsPartialFailure() throws Exception {
+        User owner = register(), first = register(), second = register();
+        String number = createMeeting(owner, "");
+        for (User user : List.of(owner, first, second)) assertEquals(200, join(user, number, "").statusCode());
+        String id = db.one("SELECT id FROM meetings WHERE meeting_number=?", number).get("id").toString();
+        when(media.muteAll(id, Set.of(first.id(), second.id())))
+            .thenReturn(new MeetingMediaService.MuteResult(Set.of(first.id()), Set.of(second.id())));
+        Socket host = socket(owner, number), guest = socket(first, number), tab = socket(first, number), other = socket(second, number);
+        try {
+            send(host, Map.of("type", "MUTE_ALL"));
+            receive(guest, "MUTED");
+            receive(tab, "MUTED");
+            assertTrue(receive(other, "NOTICE").get("message").toString().contains("请检查"));
+            var result = receive(host, "MUTE_ALL_RESULT");
+            assertEquals(1, result.get("muted"));
+            assertEquals(1, result.get("failed"));
+            verify(media).muteAll(id, Set.of(first.id(), second.id()));
+        } finally { close(host, guest, tab, other); }
     }
     @Test void passwordPermissionChatIsolationAndRemoval() throws Exception {
         User host=register(),guest=register(),other=register();

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LockKeyhole, LockKeyholeOpen, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
@@ -41,7 +41,11 @@ let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelec
 let membersInitialized=false
 const pendingTimers=new Map()
 const enteredAt=Date.now()
-const isHost=computed(()=>meeting.value?.isOwner===true)
+const supportsHostControls = computed(() => typeof meeting.value?.hostUserId === 'string')
+const isHost = computed(() => supportsHostControls.value
+  ? meeting.value.hostUserId === user.current?.id
+  : meeting.value?.isOwner === true)
+const locked = computed(() => meeting.value?.locked === true)
 const localMember=computed(()=>members.value.find(member=>member.userId===user.current?.id))
 const chatMessages=computed(()=>groupChat([...messages.value,...pending.value]))
 const connectionText=computed(()=>({connected:'连接正常',connecting:'正在连接',reconnecting:'正在重连',expired:'请重新加入',closed:'已断开'})[connection.value]||'连接中')
@@ -97,6 +101,20 @@ function sendPending(item){
 function retryMessage(item){if(!item)return;if(connection.value!=='connected'){flash('连接已断开，请稍后重试');return}sendPending(item)}
 async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
 function handleEvent(event){
+  if (event.type === 'JOINED' && typeof event.hostUserId === 'string') {
+    meeting.value.hostUserId = event.hostUserId
+    meeting.value.locked = event.locked
+  }
+  if (event.type === 'HOST_CHANGED') {
+    meeting.value.hostUserId = event.hostUserId
+    menu.value = ''
+    flash(isHost.value ? '你已成为主持人' : `${event.nickname} 已成为主持人`)
+  }
+  if (event.type === 'MEETING_LOCK_CHANGED') {
+    meeting.value.locked = event.locked
+    flash(event.locked ? '会议已锁定' : '会议已解锁')
+  }
+  if (event.type === 'MUTE_ALL_RESULT') flash(event.message)
   if(event.type==='MEMBERS'){
     const next=event.members||[]
     if(membersInitialized){
@@ -220,9 +238,18 @@ function sendChat(){
   pending.value.push({client_id:clientId,user_id:user.current.id,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now(),isPending:true})
   sendPending(pending.value[pending.value.length-1]);draft.value=''
 }
-function manage(type,target){
-  if(type==='KICK'){confirmTarget.value=target;confirmKind.value='kick';return}
-  menu.value='';if(!socket?.send({type,userId:target.userId}))flash('连接已断开，请稍后重试')
+function sendHostAction(action) {
+  if (!isHost.value) return
+  if (!socket?.send(action)) flash('连接已断开，请稍后重试')
+}
+function manage(type, target) {
+  if (type === 'KICK' || type === 'TRANSFER_HOST') {
+    confirmTarget.value = target
+    confirmKind.value = type === 'KICK' ? 'kick' : 'transferHost'
+    return
+  }
+  menu.value = ''
+  sendHostAction({type, userId:target.userId})
 }
 function openRename(member){menu.value='';renameTarget.value=member;renameValue.value=member.nickname}
 function rename(){const value=renameValue.value.trim();if(!value)return;if(!socket?.send({type:'RENAME',userId:renameTarget.value.userId,nickname:value}))flash('连接已断开，请稍后重试');renameTarget.value=null}
@@ -238,15 +265,20 @@ const confirmation=computed(()=>({
   leave:{title:'离开会议',description:'确定离开当前会议？你可以使用会议号重新加入。',action:'离开会议'},
   end:{title:'结束会议',description:'确定结束本次会议？所有成员将离开会议。',action:'结束会议'},
   kick:{title:'移出成员',description:`确定将“${confirmTarget.value?.nickname || ''}”移出会议？`,action:'移出成员'},
+  muteAll:{title:'全员静音',description:'静音其他在会成员。成员可随时自行开麦。',action:'全员静音',destructive:false},
+  lock:{title:'锁定会议',description:'锁定后，新成员无法加入。已获准加入的成员可用当前登录会话重连。',action:'锁定会议',destructive:false},
+  transferHost:{title:'转让主持人',description:`将主持人交给“${confirmTarget.value?.nickname || ''}”？对方将负责管理本次会议。`,action:'转让主持人',destructive:false},
 })[confirmKind.value] || {})
 async function confirmAction(){
   if(confirmBusy.value)return
   confirmBusy.value=true
   try{
     if(confirmKind.value==='leave')await leave()
-    else if(confirmKind.value==='end')await endMeeting()
-    else if(confirmKind.value==='kick' && confirmTarget.value){
-      if(!socket?.send({type:'KICK',userId:confirmTarget.value.userId}))flash('连接已断开，请稍后重试')
+    else if(confirmKind.value==='end' && isHost.value)await endMeeting()
+    else if (confirmKind.value === 'muteAll') sendHostAction({type:'MUTE_ALL'})
+    else if (confirmKind.value === 'lock') sendHostAction({type:'SET_MEETING_LOCK',locked:true})
+    else if (confirmTarget.value && ['kick','transferHost'].includes(confirmKind.value)) {
+      sendHostAction({type:confirmKind.value === 'kick' ? 'KICK' : 'TRANSFER_HOST',userId:confirmTarget.value.userId})
       menu.value=''
     }
   }finally{confirmKind.value='';confirmTarget.value=null;confirmBusy.value=false}
@@ -286,6 +318,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
           <div><strong>{{ meeting.title }}</strong><small>{{ groupNumber(number) }}</small></div>
         </div>
         <div class="conference-header-right">
+          <span v-if="locked" class="conference-lock" role="img" aria-label="会议已锁定" title="会议已锁定"><LockKeyhole :size="14"/><span>已锁定</span></span>
           <span class="connection-status" :class="connection"><i></i><span class="connection-text">{{ connectionText }}</span></span>
           <button class="meeting-button conference-share" aria-label="邀请参会者" @click="inviteDialog=true"><Copy :size="15"/> <span>邀请</span></button>
           <button class="meeting-button conference-share shortcut-trigger" aria-label="查看快捷键" @click="shortcutsDialog=true"><Keyboard :size="16"/></button>
@@ -325,13 +358,29 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
           </div>
           <div v-if="panel==='members'" class="members-panel">
             <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
+            <div v-if="isHost && supportsHostControls" class="host-controls" aria-label="主持人操作" role="group">
+              <button :disabled="connection !== 'connected' || members.length < 2" @click="confirmKind='muteAll'">
+                <MicOff :size="16"/> 全员静音
+              </button>
+              <button v-if="locked" :disabled="connection !== 'connected'" @click="sendHostAction({type:'SET_MEETING_LOCK',locked:false})">
+                <LockKeyholeOpen :size="16"/> 解锁会议
+              </button>
+              <button v-else :disabled="connection !== 'connected'" @click="confirmKind='lock'">
+                <LockKeyhole :size="16"/> 锁定会议
+              </button>
+            </div>
             <div v-for="member in members" :key="member.userId" class="member-row">
               <span class="member-avatar" :style="avatarStyle(member.userId)">{{ member.nickname?.slice(0,1) }}</span>
               <div class="member-name"><strong>{{ member.nickname }}{{ member.userId===user.current.id ? '（我）' : '' }}</strong><small>{{ member.host ? '主持人' : '参会者' }} · {{ mediaState==='connected' ? (memberMedia[member.userId]?.publishing ? '推流中' : '未推流') : '音视频未连接' }}</small></div>
               <span class="member-mic" :class="{ on: mediaState==='connected' && memberMedia[member.userId]?.microphone }" :title="mediaState==='connected' ? (memberMedia[member.userId]?.microphone ? '麦克风开' : '麦克风关') : '麦克风状态未知'"><Mic v-if="mediaState==='connected' && memberMedia[member.userId]?.microphone" :size="16"/><MicOff v-else :size="16"/></span>
               <button v-if="isHost && member.userId!==user.current.id" class="member-menu-button" :aria-label="`管理 ${member.nickname}`" @click="menu=menu===member.userId ? '' : member.userId"><MoreHorizontal :size="19"/></button>
               <button v-else-if="member.userId===user.current.id" class="member-menu-button" aria-label="修改我的昵称" @click="openRename(member)"><Settings2 :size="16"/></button>
-              <div v-if="menu===member.userId" class="member-popover"><button @click="manage('MUTE',member)">静音</button><button @click="openRename(member)">修改昵称</button><button class="danger-text" @click="manage('KICK',member)">移出会议</button></div>
+              <div v-if="isHost && menu===member.userId" class="member-popover">
+                <button @click="manage('MUTE',member)">静音</button>
+                <button @click="openRename(member)">修改昵称</button>
+                <button v-if="supportsHostControls" @click="manage('TRANSFER_HOST',member)">转让主持人</button>
+                <button class="danger-text" @click="manage('KICK',member)">移出会议</button>
+              </div>
             </div>
             <div v-if="!members.length" class="panel-empty">正在同步成员…</div>
           </div>
@@ -361,7 +410,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
         <h2 id="shortcuts-title">键盘快捷键</h2><p class="muted">输入文字时，快捷键不会触发。</p>
         <dl><div><dt><kbd>M</kbd></dt><dd>开启或关闭麦克风</dd></div><div><dt><kbd>V</kbd></dt><dd>开启或关闭摄像头</dd></div><div><dt><kbd>S</kbd></dt><dd>共享或停止共享屏幕</dd></div><div><dt><kbd>C</kbd></dt><dd>打开聊天</dd></div><div><dt><kbd>Esc</kbd></dt><dd>关闭面板</dd></div><div><dt><kbd>?</kbd></dt><dd>查看快捷键</dd></div></dl>
       </ModalDialog>
-      <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
+      <ConfirmDialog :open="!!confirmKind" :title="confirmation.title" :description="confirmation.description" :confirm-text="confirmation.action" :destructive="confirmation.destructive ?? true" :busy="confirmBusy" @close="confirmKind=''" @confirm="confirmAction" />
       <div v-if="notice" class="toast">{{ notice }}</div>
     </template>
   </main>

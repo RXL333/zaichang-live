@@ -65,15 +65,46 @@ public class MeetingMediaService {
         try {
             for(var participant:participants(id)) if(belongs(participant.getIdentity(),uid)) {
                 for(var track:participant.getTracksList()) {
-                    boolean isMic=track.getType()==LivekitModels.TrackType.AUDIO && (participant.getIdentity().startsWith("obs.") || track.getSource()==LivekitModels.TrackSource.MICROPHONE);
-                    if(isMic && !track.getMuted()) {
-                        var response=rooms.mutePublishedTrack(room(id),participant.getIdentity(),track.getSid(),true).execute();
-                        if(!response.isSuccessful())throw unavailable(); muted++;
+                    if (isOpenMic(participant, track)) {
+                        muteTrack(id, participant, track);
+                        muted++;
                     }
                 }
             }
             return muted;
         }catch(ResponseStatusException e){throw e;}catch(Exception e){throw unavailable();}
+    }
+    record MuteResult(Set<String> mutedUsers, Set<String> failedUsers) {}
+
+    MuteResult muteAll(String id, Set<String> targets) {
+        Set<String> muted = new HashSet<>(), failed = new HashSet<>();
+        if (targets.isEmpty()) return new MuteResult(muted, failed);
+        for (var participant : participants(id)) {
+            String[] identity = participant.getIdentity().split("\\.", 3);
+            if (identity.length != 3 || !targets.contains(identity[1]) || !belongs(participant.getIdentity(), identity[1])) continue;
+            String userId = identity[1];
+            for (var track : participant.getTracksList()) {
+                if (!isOpenMic(participant, track)) continue;
+                try {
+                    muteTrack(id, participant, track);
+                    muted.add(userId);
+                } catch (Exception error) {
+                    failed.add(userId);
+                }
+            }
+        }
+        muted.removeAll(failed);
+        return new MuteResult(muted, failed);
+    }
+
+    private static boolean isOpenMic(LivekitModels.ParticipantInfo participant, LivekitModels.TrackInfo track) {
+        return track.getType() == LivekitModels.TrackType.AUDIO && !track.getMuted()
+            && (participant.getIdentity().startsWith("obs.") || track.getSource() == LivekitModels.TrackSource.MICROPHONE);
+    }
+
+    private void muteTrack(String id, LivekitModels.ParticipantInfo participant, LivekitModels.TrackInfo track) throws java.io.IOException {
+        var response = rooms.mutePublishedTrack(room(id), participant.getIdentity(), track.getSid(), true).execute();
+        if (!response.isSuccessful()) throw unavailable();
     }
     public void removeMember(String id,String uid){
         boolean failed=false;

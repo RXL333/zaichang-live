@@ -16,9 +16,19 @@ public class MeetingService {
     private final Db db;
     private final PasswordEncoder passwords;
     private final MeetingRateLimiter limits;
+    private final SessionLocks locks;
     private final SecureRandom random = new SecureRandom();
-    public MeetingService(Db db, PasswordEncoder passwords, MeetingRateLimiter limits) { this.db=db; this.passwords=passwords; this.limits=limits; }
+    public MeetingService(Db db, PasswordEncoder passwords, MeetingRateLimiter limits, SessionLocks locks) {
+        this.db = db;
+        this.passwords = passwords;
+        this.limits = limits;
+        this.locks = locks;
+    }
     static String grantKey(String id) { return "meeting:"+id; }
+    static String hostId(Map<String,Object> meeting) {
+        return Objects.toString(meeting.get("host_user_id"), meeting.get("owner_id").toString());
+    }
+    static boolean isLocked(Map<String,Object> meeting) { return Boolean.TRUE.equals(meeting.get("locked")); }
 
     public Map<String,Object> byNumber(String number) {
         return db.one("SELECT m.*, u.nickname AS owner_name FROM meetings m JOIN app_users u ON u.id=m.owner_id WHERE m.meeting_number=? AND m.status<>'DELETED'",number);
@@ -32,6 +42,7 @@ public class MeetingService {
         result.put("title",meeting.get("title")); result.put("ownerId",meeting.get("owner_id"));
         result.put("ownerName",meeting.get("owner_name")); result.put("status",meeting.get("status"));
         result.put("hasPassword",meeting.get("password_hash")!=null);
+        result.put("locked",isLocked(meeting));
         result.put("isOwner",Objects.equals(uid,meeting.get("owner_id"))); result.put("createdAt",meeting.get("created_at"));
         return result;
     }
@@ -58,7 +69,16 @@ public class MeetingService {
         throw new ResponseStatusException(SERVICE_UNAVAILABLE,"暂时无法创建会议，请重试");
     }
     public void requireOwner(Map<String,Object> meeting,String uid) {
-        if(!Objects.equals(meeting.get("owner_id"),uid)) throw new ResponseStatusException(FORBIDDEN,"只有主持人可以进行此操作");
+        if(!Objects.equals(meeting.get("owner_id"),uid)) throw new ResponseStatusException(FORBIDDEN,"只有会议创建者可以进行此操作");
+    }
+    public void requireHost(Map<String,Object> meeting,String uid) {
+        if(!hostId(meeting).equals(uid)) throw new ResponseStatusException(FORBIDDEN,"只有当前主持人可以进行此操作");
+    }
+    void setLocked(String id, boolean locked) {
+        db.jdbc.update("UPDATE meetings SET locked=? WHERE id=?", locked, id);
+    }
+    void transferHost(String id, String target) {
+        db.jdbc.update("UPDATE meetings SET host_user_id=? WHERE id=?", target, id);
     }
     public void requireOpen(Map<String,Object> meeting) {
         if(!"OPEN".equals(meeting.get("status"))) throw new ResponseStatusException(CONFLICT,"会议已结束");
@@ -74,9 +94,21 @@ public class MeetingService {
         return publicInfo(byNumber(number),uid);
     }
     public Map<String,Object> join(String number, HttpSession session, Map<String,Object> input) {
-        String uid=db.requireUser(session); limits.join(uid); Map<String,Object> meeting=byNumber(number); requireOpen(meeting);
+        String uid = db.requireUser(session);
+        limits.join(uid);
+        String id = byNumber(number).get("id").toString();
+        synchronized (locks.meeting(id)) {
+            var meeting = byId(id);
+            requireOpen(meeting);
+            if (isLocked(meeting) && !canRejoinLockedMeeting(meeting, session)) {
+                throw new ResponseStatusException(LOCKED, "会议已锁定，请联系主持人");
+            }
+            return admit(meeting, session, input, uid);
+        }
+    }
+    private Map<String,Object> admit(Map<String,Object> meeting, HttpSession session, Map<String,Object> input, String uid) {
         Object hash=meeting.get("password_hash");
-        if(hash!=null && !Objects.equals(uid,meeting.get("owner_id")) && !passwords.matches(Db.text(input.get("password")),hash.toString()))
+        if(!isLocked(meeting) && hash!=null && !Objects.equals(uid,meeting.get("owner_id")) && !passwords.matches(Db.text(input.get("password")),hash.toString()))
             throw new ResponseStatusException(FORBIDDEN,"会议密码不正确");
         String nickname=Db.text(input.get("nickname")); if(nickname.isEmpty()) nickname=db.user(uid).get("nickname").toString();
         nickname=Db.checked(nickname,40,"会议昵称"); String id=meeting.get("id").toString();
@@ -94,16 +126,27 @@ public class MeetingService {
     public Map<String,Object> requireGrant(Map<String,Object> meeting,String uid,Object version) {
         requireOpen(meeting);
         if(uid==null || version==null) throw new ResponseStatusException(FORBIDDEN,"请先加入会议");
-        Map<String,Object> member=db.maybe("SELECT * FROM meeting_members WHERE meeting_id=? AND user_id=?",meeting.get("id"),uid);
-        if(member==null || !(version instanceof Number) || ((Number)version).intValue()!=((Number)member.get("grant_version")).intValue())
+        var member = grantedMember(meeting, uid, version);
+        if(member==null)
             throw new ResponseStatusException(FORBIDDEN,"会议访问已失效，请重新加入");
         return member;
     }
     public Map<String,Object> requireGrant(Map<String,Object> meeting,HttpSession session) {
         String uid=db.requireUser(session); return requireGrant(meeting,uid,session.getAttribute(grantKey(meeting.get("id").toString())));
     }
+    boolean canRejoinLockedMeeting(Map<String,Object> meeting, HttpSession session) {
+        if (!isLocked(meeting) || !"OPEN".equals(meeting.get("status"))) return false;
+        String uid = (String) session.getAttribute("userId");
+        Object version = session.getAttribute(grantKey(meeting.get("id").toString()));
+        return grantedMember(meeting, uid, version) != null;
+    }
+    private Map<String,Object> grantedMember(Map<String,Object> meeting, String uid, Object version) {
+        if (uid == null || !(version instanceof Number grant)) return null;
+        var member = db.maybe("SELECT * FROM meeting_members WHERE meeting_id=? AND user_id=?", meeting.get("id"), uid);
+        return member != null && grant.intValue() == ((Number) member.get("grant_version")).intValue() ? member : null;
+    }
     public void rename(Map<String,Object> meeting,String actor,String target,String nickname) {
-        if(!actor.equals(target)) requireOwner(meeting,actor);
+        if(!actor.equals(target)) requireHost(meeting,actor);
         String value=Db.checked(nickname,40,"会议昵称");
         if(db.jdbc.update("UPDATE meeting_members SET nickname=? WHERE meeting_id=? AND user_id=?",value,meeting.get("id"),target)==0)
             throw new ResponseStatusException(NOT_FOUND,"没有找到该成员");

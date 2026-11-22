@@ -219,6 +219,35 @@ it('announces membership, new messages and host mute to assistive technology',as
   wrapper.unmount()
 })
 
+it('updates lock and host controls from the server without treating the owner as the new host', async () => {
+  const wrapper = mount(MeetingRoomView, { attachTo: document.body, global: { stubs: { MeetingMedia: true, LogoMark: true } } })
+  await vi.waitFor(() => expect(wrapper.text()).toContain('项目会议'))
+  expect(wrapper.find('.host-controls').exists()).toBe(false)
+  socketMock.onEvent({ type: 'JOINED', hostUserId: 'user-1', locked: false })
+  socketMock.onEvent({ type: 'MEMBERS', members: [
+    { userId: 'user-1', nickname: '小林', host: true },
+    { userId: 'other', nickname: '同事', host: false },
+  ] })
+  await wrapper.vm.$nextTick()
+  const lock = wrapper.findAll('.host-controls button').find(button => button.text() === '锁定会议')
+  await lock.trigger('click')
+  document.querySelector('.confirm-dialog .primary').click()
+  expect(socketMock.send).toHaveBeenCalledWith({ type: 'SET_MEETING_LOCK', locked: true })
+  socketMock.onEvent({ type: 'MEETING_LOCK_CHANGED', locked: true })
+  await wrapper.vm.$nextTick()
+  expect(wrapper.get('.conference-lock').text()).toBe('已锁定')
+
+  await wrapper.get('[aria-label="管理 同事"]').trigger('click')
+  await wrapper.findAll('.member-popover button').find(button => button.text() === '转让主持人').trigger('click')
+  document.querySelector('.confirm-dialog .primary').click()
+  expect(socketMock.send).toHaveBeenCalledWith({ type: 'TRANSFER_HOST', userId: 'other' })
+  socketMock.onEvent({ type: 'HOST_CHANGED', hostUserId: 'other', nickname: '同事' })
+  await wrapper.vm.$nextTick()
+  expect(wrapper.find('.host-controls').exists()).toBe(false)
+  expect(wrapper.find('.end-meeting').exists()).toBe(false)
+  wrapper.unmount()
+})
+
 it('turns off a camera request that finishes after removal from the meeting',async()=>{
   let finishCamera
   socketMock.camera.mockImplementation(value=>value ? new Promise(resolve=>{finishCamera=resolve}) : Promise.resolve())

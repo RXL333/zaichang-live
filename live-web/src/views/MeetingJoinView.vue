@@ -16,6 +16,7 @@ const route=useRoute(),router=useRouter(),user=useUser(),service=useServiceHealt
 const meeting=ref(null),loading=ref(true),joining=ref(false),error=ref(''),errorKind=ref(''),joinError=ref(''),nickname=ref(''),password=ref('')
 const deviceCheck=ref(null),deviceSelection=ref({microphoneOn:false,cameraOn:false})
 let requestId=0
+const canRejoin = computed(() => meeting.value?.locked === true && meeting.value?.canRejoinLockedMeeting === true)
 const state=computed(()=>{
   if(service.status==='timeout')return 'service-timeout'
   if(service.status==='starting')return 'service-starting'
@@ -23,8 +24,8 @@ const state=computed(()=>{
   if(errorKind.value)return errorKind.value
   if(user.loadError)return 'network'
   if(meeting.value?.status!=='OPEN')return 'ended'
-  if(meeting.value?.locked===true)return 'locked'
   if(!user.current)return 'login'
+  if(meeting.value?.locked===true && !canRejoin.value)return 'locked'
   return 'form'
 })
 async function load(){
@@ -75,7 +76,10 @@ function retry(){if(user.loadError)user.load();if(service.status==='timeout')ser
             <template v-else-if="state==='service-timeout'"><strong>会议服务暂未就绪</strong><p>请重试连接后加入会议。</p><button class="meeting-button outline" @click="retry">重试连接</button></template>
             <template v-else-if="state==='missing'"><strong>未找到这个会议</strong><p>请检查会议号，或向主持人重新获取邀请。</p><RouterLink class="meeting-button outline" to="/">重新输入会议号</RouterLink></template>
             <template v-else-if="state==='ended'"><strong>会议已结束</strong><p>请联系主持人获取新的会议信息。</p><RouterLink class="meeting-button outline" to="/">返回首页</RouterLink></template>
-            <template v-else-if="state==='locked'"><strong>会议已锁定</strong><p>当前无法加入，请联系主持人。</p><RouterLink class="meeting-button outline" to="/">返回首页</RouterLink></template>
+            <template v-else-if="state==='locked'">
+              <strong>会议已锁定</strong><p>请联系主持人，解锁后可以重新尝试。</p>
+              <button class="meeting-button outline" @click="retry">重新检查</button><RouterLink class="text-link" to="/">返回首页</RouterLink>
+            </template>
             <template v-else-if="state==='login'"><strong>登录后加入会议</strong><p>请先登录账号，再确认参会信息。</p><button class="meeting-button primary" @click="user.openAuth()">登录账号</button><RouterLink class="text-link" to="/">返回首页</RouterLink></template>
             <template v-else><strong>暂时无法获取会议信息</strong><p>{{ error || '请检查网络后重试。' }}</p><button class="meeting-button outline" @click="retry">重新查找</button></template>
           </div>
@@ -83,8 +87,9 @@ function retry(){if(user.loadError)user.load();if(service.status==='timeout')ser
             <h2>确认参会信息</h2>
             <form class="form-stack join-form" @submit.prevent="join">
               <label>会议昵称<input v-model.trim="nickname" maxlength="40" :placeholder="user.current?.nickname || '输入参会时显示的名字'"/></label>
-              <label v-if="meeting.hasPassword && !meeting.isOwner">会议密码<input v-model="password" type="password" required autocomplete="off" placeholder="请输入会议密码"/></label>
-              <p v-if="meeting.hasPassword" class="join-security"><LockKeyhole :size="14"/> 此会议已设置密码</p>
+              <label v-if="meeting.hasPassword && !meeting.isOwner && !canRejoin">会议密码<input v-model="password" type="password" required autocomplete="off" placeholder="请输入会议密码"/></label>
+              <p v-if="canRejoin" class="join-security"><LockKeyhole :size="14"/> 会议已锁定，你仍可重新加入</p>
+              <p v-else-if="meeting.hasPassword" class="join-security"><LockKeyhole :size="14"/> 此会议已设置密码</p>
               <p v-if="joinError" class="form-error" role="alert">{{ joinError }}</p>
               <button class="meeting-button primary full" :disabled="joining">{{ joining ? '正在加入…' : '加入会议' }} <ArrowRight :size="17"/></button>
             </form>
