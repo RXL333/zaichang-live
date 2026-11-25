@@ -57,6 +57,77 @@ test('the homepage illustration releases its entrance transform',async({page})=>
   if(process.env.PHASE3_SCREENSHOTS)await page.screenshot({path:'../output/phase3-home-after-fix.png'})
 })
 
+async function expectReadableTheme(page) {
+  const ratios = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    const luminance = value => {
+      const color = value.startsWith('--') ? style.getPropertyValue(value).trim() : value
+      const hex = color.length === 4 ? [...color.slice(1)].map(digit => digit + digit).join('') : color.slice(1)
+      const channels = [0, 2, 4].map(index => {
+        const channel = parseInt(hex.slice(index, index + 2), 16) / 255
+        return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
+      })
+      return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722
+    }
+    const pairs = [
+      ['--ink', '--mist'], ['--ink', '--paper'], ['--ink', '--surface-soft'],
+      ['--slate', '--mist'], ['--slate', '--paper'], ['--slate', '--surface-soft'],
+      ['--slate-soft', '--mist'], ['--slate-soft', '--paper'],
+      ['--presence', '--mist'], ['--presence', '--paper'], ['--presence-dark', '--presence-wash'],
+      ['--danger', '--paper'], ['#fff', '--danger-fill'], ['#fff', '--primary-fill'],
+      ['--strong-ink', '--strong-fill'], ['--notice-ink', '--notice-fill'],
+    ]
+    return pairs.map(pair => {
+      const [lighter, darker] = pair.map(luminance).sort((a, b) => b - a)
+      return { colors: pair.join(' / '), ratio: (lighter + .05) / (darker + .05) }
+    })
+  })
+  for (const { colors, ratio } of ratios) expect(ratio, colors).toBeGreaterThanOrEqual(4.5)
+}
+
+test('lobby theme follows the system and keeps an explicit mobile choice', async ({ page }) => {
+  await mockBackend(page)
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+  await page.goto('/')
+  const root = page.locator('html')
+  const appearance = page.getByRole('combobox', { name: '页面外观' })
+  await expect(appearance).toHaveValue('system')
+  await expect(root).toHaveAttribute('data-theme', 'dark')
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#151b18')
+  await expectReadableTheme(page)
+  await expect(page.locator('.hero-text h1 .rise').first()).toHaveCSS('opacity', '1')
+  if (process.env.PHASE4_SCREENSHOTS) await page.screenshot({ path: '../output/phase4-home-dark.png' })
+
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(root).toHaveAttribute('data-theme', 'light')
+  await expectReadableTheme(page)
+  await page.setViewportSize({ width: 320, height: 668 })
+  await appearance.selectOption('dark')
+  await page.reload()
+  await expect(appearance).toHaveValue('dark')
+  await expect(root).toHaveAttribute('data-theme', 'dark')
+  await expect(page.getByRole('button', { name: '打开菜单' })).toBeInViewport({ ratio: 1 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+
+  await page.getByRole('button', { name: '创建会议', exact: true }).first().click()
+  const dialog = page.getByRole('dialog', { name: '创建会议' })
+  await expect(dialog).toHaveCSS('background-color', 'rgb(32, 41, 37)')
+  await expect(dialog.getByLabel('会议名称')).toBeFocused()
+  if (process.env.PHASE4_SCREENSHOTS) await page.screenshot({ path: '../output/phase4-modal-dark.png' })
+  await page.keyboard.press('Escape')
+
+  await page.route('**/api/auth/me', route => route.fulfill({ json: { authenticated: false } }))
+  await page.reload()
+  await page.getByRole('button', { name: '打开菜单' }).click()
+  await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
+  const login = page.getByRole('dialog', { name: '登录在场' })
+  await expect(login).toHaveCSS('background-color', 'rgb(32, 41, 37)')
+  await expect(login.getByLabel('账号')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await appearance.selectOption('system')
+  await expect(root).toHaveAttribute('data-theme', 'light')
+})
+
 test('meeting number, join validation and keyboard meeting flow',async({page})=>{
   await mockBackend(page)
   await page.goto('/')
