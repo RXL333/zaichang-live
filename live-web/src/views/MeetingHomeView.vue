@@ -152,6 +152,6 @@ function date(value){return new Intl.DateTimeFormat('zh-CN',{year:'numeric',mont
       <h2 id="meeting-dialog-title">{{ dialog==='create' ? '创建会议' : '编辑会议' }}</h2><p class="muted">{{ dialog==='create' ? '设置会议名称，再把会议号发给要参会的人。' : '修改会议信息，新密码对之后加入的成员生效。' }}</p><form class="form-stack" @submit.prevent="submit"><label>会议名称<input v-model.trim="title" required maxlength="80" placeholder="例如：项目周会"/></label><template v-if="dialog==='edit'"><label>会议密码<select v-model="passwordAction"><option value="keep">保持当前设置</option><option value="set">设置新密码</option><option value="remove">取消密码</option></select></label></template><label v-if="dialog==='create' || passwordAction==='set'">{{ dialog==='create' ? '会议密码（选填）' : '新密码' }}<input v-model="password" type="password" maxlength="32" autocomplete="new-password" placeholder="4–32 个字符"/></label><p v-if="formError" class="form-error" role="alert">{{ formError }}</p><button class="meeting-button primary full" :disabled="saving">{{ saving ? '正在保存…' : dialog==='create' ? '创建并进入' : '保存修改' }} <ArrowRight :size="17"/></button></form>
     </ModalDialog>
     <ConfirmDialog :open="!!removeTarget" title="删除会议" :description="`确定删除“${removeTarget?.title || ''}”？正在进行的会议也会结束。`" confirm-text="删除会议" :busy="removing" @close="removeTarget=null" @confirm="confirmRemove" />
-    <div v-if="toast" class="toast" role="status">{{ toast }}</div>
+    <Transition name="toast-motion"><div v-if="toast" class="toast" role="status">{{ toast }}</div></Transition>
   </main>
 </template>

@@ -76,9 +76,10 @@ function cancelDrag() {
 
 function finishDrag(event) {
   if (pointer?.id !== event.pointerId) return
-  const close = dragOffset.value >= 64
+  const distance = event.clientY - pointer.start
+  if (Math.abs(distance) > 5) dragged = true
   cancelDrag()
-  if (close) emit('close')
+  if (distance >= 64) emit('close')
 }
 
 function closeFromHandle(event) {

@@ -277,6 +277,18 @@ test('the mobile drawer follows a drag, snaps back and restores keyboard focus',
   await dragHandle(95)
   await expect(drawer).toBeHidden()
   await expect(more).toBeFocused()
+
+  const microphone = page.locator('.toolbar-controls .meeting-control').first()
+  const button = await microphone.boundingBox()
+  const x = button.x + button.width / 2, y = button.y + button.height / 2
+  const touch = await page.context().newCDPSession(page)
+  await touch.send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{x,y}] })
+  for (const distance of [25, 55, 85]) {
+    await touch.send('Input.dispatchTouchEvent', { type:'touchMove', touchPoints:[{x,y:y-distance}] })
+  }
+  await touch.send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] })
+  await expect(drawer).toBeVisible()
+  await expect(microphone).toHaveAttribute('aria-label','开启麦克风')
 })
 
 test('chat opens at the latest message and keeps the reading position across tabs', async ({ page }) => {
@@ -310,6 +322,49 @@ test('chat opens at the latest message and keeps the reading position across tab
   await expect.poll(distanceFromBottom).toBeLessThanOrEqual(2)
   await expect(jump).toBeHidden()
   await expect(chat).toBeFocused()
+})
+
+test('meeting feedback and popovers stay clear of the stage and restore focus', async ({ page }) => {
+  const connections = await mockBackend(page)
+  await page.goto('/meeting/123456789')
+  const status = page.locator('.connection-status')
+  await expect(status).toHaveClass(/\bconnected\b/)
+
+  const audio = page.getByRole('button', { name: '选择麦克风和扬声器' })
+  const gallery = page.getByRole('button', { name: '画廊' })
+  await audio.click()
+  await expect(audio).toHaveAttribute('aria-expanded', 'true')
+  await page.keyboard.press('Tab')
+  await expect(page.locator('.device-popover button').first()).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(audio).toBeFocused()
+  await expect(audio).toHaveAttribute('aria-expanded', 'false')
+  await audio.click()
+  await gallery.click()
+  await expect(audio).toHaveAttribute('aria-expanded', 'false')
+
+  const invite = page.getByRole('button', { name: '邀请参会者' })
+  await invite.click()
+  const dialog = page.getByRole('dialog', { name: '邀请参会' })
+  await expect(dialog.getByRole('button', { name: '关闭' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(invite).toBeFocused()
+
+  const stage = page.locator('.meeting-stage')
+  const before = await stage.boundingBox()
+  await connections[0].close({ code:1012, reason:'Simulate reconnect' })
+  await expect(page.locator('.connection-banner')).toBeVisible()
+  expect(await stage.boundingBox()).toEqual(before)
+  await expect.poll(() => connections.length).toBe(2)
+  await expect(status).toHaveClass(/\bconnected\b/)
+
+  connections[1].send(JSON.stringify({ type:'NOTICE', message:'会议信息已更新' }))
+  const notice = page.locator('.meeting-toast')
+  await expect(notice).toHaveText('会议信息已更新')
+  await expect(notice).toHaveCSS('pointer-events','none')
+  expect(await stage.boundingBox()).toEqual(before)
+  if(process.env.INTERACTION_SCREENSHOTS)await page.screenshot({path:'../output/interaction-feedback.png',animations:'disabled'})
 })
 
 for(const viewport of [{width:375,height:667},{width:667,height:375},{width:1280,height:800}]){

@@ -57,8 +57,12 @@ function release() {
   previousFocus = null
   nextTick(() => {
     const top = openDialogs.at(-1)
-    if (target?.isConnected && (!top || top.dialog.value?.contains(target))) target.focus()
+    if (target?.isConnected && (!top || top.dialog.value?.contains(target))) target.focus({ preventScroll:true })
   })
+}
+function markLeaving(element) {
+  element.setAttribute('inert', '')
+  element.setAttribute('aria-hidden', 'true')
 }
 watch(() => props.open, async open => {
   const revision = ++focusRevision
@@ -78,11 +82,13 @@ onBeforeUnmount(() => { focusRevision++; release() })
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-      <section ref="dialog" class="modal" :class="dialogClass" role="dialog" aria-modal="true" :aria-labelledby="labelledby" :aria-describedby="describedby" tabindex="-1">
-        <button type="button" class="icon-button modal-close" data-modal-close aria-label="关闭" @click="emit('close')"><X :size="20" /></button>
-        <slot />
-      </section>
-    </div>
+    <Transition name="dialog-motion" @before-leave="markLeaving">
+      <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+        <section ref="dialog" class="modal" :class="dialogClass" role="dialog" aria-modal="true" :aria-labelledby="labelledby" :aria-describedby="describedby" tabindex="-1">
+          <button type="button" class="icon-button modal-close" data-modal-close aria-label="关闭" @click="emit('close')"><X :size="20" /></button>
+          <slot />
+        </section>
+      </div>
+    </Transition>
   </Teleport>
 </template>
