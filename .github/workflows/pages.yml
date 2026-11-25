@@ -6,6 +6,7 @@ on:
     types: [completed]
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -55,10 +56,26 @@ jobs:
           npm run build
       - uses: actions/configure-pages@v5
         if: steps.revision.outputs.current == 'true'
-      - uses: actions/upload-pages-artifact@v3
+      - id: upload
+        uses: actions/upload-pages-artifact@v3
         if: steps.revision.outputs.current == 'true'
         with:
           path: live-web/dist
+      - name: Wait for the Pages artifact to be listed
+        if: steps.revision.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        run: |
+          artifacts="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages"
+          for attempt in {1..10}; do
+            if gh api "$artifacts" --jq '.artifacts[] | select(.expired == false).id' | grep -Fxq "$PAGES_ARTIFACT_ID"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo '::error::The uploaded Pages artifact is not yet listed.'
+          exit 1
       - id: deployment
         if: steps.revision.outputs.current == 'true'
         uses: actions/deploy-pages@v4
