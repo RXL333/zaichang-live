@@ -137,6 +137,7 @@ public class MeetingService {
     boolean canRejoinLockedMeeting(Map<String,Object> meeting, HttpSession session) {
         if (!isLocked(meeting) || !"OPEN".equals(meeting.get("status"))) return false;
         String uid = (String) session.getAttribute("userId");
+        if (hostId(meeting).equals(uid)) return true;
         Object version = session.getAttribute(grantKey(meeting.get("id").toString()));
         return grantedMember(meeting, uid, version) != null;
     }

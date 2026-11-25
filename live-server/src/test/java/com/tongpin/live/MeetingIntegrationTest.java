@@ -132,7 +132,7 @@ class MeetingIntegrationTest {
         } finally { close(host, guest, other); }
     }
 
-    @Test void lockingAdmitsOnlyPreviouslyAuthorizedSessions() throws Exception {
+    @Test void lockingAdmitsPreviouslyAuthorizedAttendeeSessions() throws Exception {
         User owner = register(), member = register();
         User freshSession = authenticate("login", db.user(member.id()).get("username").toString());
         String number = createMeeting(owner, "1234"), base = "/api/meetings/" + number;
@@ -162,6 +162,34 @@ class MeetingIntegrationTest {
             assertEquals(403, join(freshSession, number, "wrong").statusCode());
             assertEquals(200, join(freshSession, number, "1234").statusCode());
         } finally { close(host); }
+    }
+
+    @Test void transferredHostCanRecoverLockedMeetingAfterSessionLoss() throws Exception {
+        User owner = register(), member = register();
+        String number = createMeeting(owner, "1234"), base = "/api/meetings/" + number;
+        assertEquals(200, join(owner, number, "").statusCode());
+        assertEquals(200, join(member, number, "1234").statusCode());
+        Socket originalHost = socket(owner, number), promotedHost = socket(member, number);
+        try {
+            send(originalHost, Map.of("type", "TRANSFER_HOST", "userId", member.id()));
+            receive(promotedHost, "HOST_CHANGED");
+            send(promotedHost, Map.of("type", "SET_MEETING_LOCK", "locked", true));
+            receive(promotedHost, "MEETING_LOCK_CHANGED");
+            assertEquals(200, request("POST", "/api/auth/logout", owner, null).statusCode());
+            assertEquals(200, request("POST", "/api/auth/logout", member, null).statusCode());
+        } finally { close(originalHost, promotedHost); }
+
+        User returningOwner = authenticate("login", db.user(owner.id()).get("username").toString());
+        User returningHost = authenticate("login", db.user(member.id()).get("username").toString());
+        assertEquals(false, object(request("GET", base, returningOwner, null).body()).get("canRejoinLockedMeeting"));
+        assertEquals(423, join(returningOwner, number, "1234").statusCode());
+        assertEquals(true, object(request("GET", base, returningHost, null).body()).get("canRejoinLockedMeeting"));
+        assertEquals(200, join(returningHost, number, "").statusCode());
+        Socket recovered = socket(returningHost, number);
+        try {
+            send(recovered, Map.of("type", "SET_MEETING_LOCK", "locked", false));
+            assertEquals(false, receive(recovered, "MEETING_LOCK_CHANGED").get("locked"));
+        } finally { close(recovered); }
     }
 
     @Test void lockAndConcurrentJoinUseTheSameMeetingState() throws Exception {
