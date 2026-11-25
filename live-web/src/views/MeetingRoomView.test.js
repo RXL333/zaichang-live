@@ -55,6 +55,12 @@ it('keeps a rate-limited chat message visible with a clear failed state', async 
   await wrapper.findAll('button').find(button=>button.text()==='重发').trigger('click')
   expect(socketMock.send.mock.calls.filter(([message])=>message.type==='CHAT')).toHaveLength(2)
   expect(socketMock.send.mock.calls.filter(([message])=>message.type==='CHAT')[0][0].clientId).toBe(socketMock.send.mock.calls.filter(([message])=>message.type==='CHAT')[1][0].clientId)
+  const pendingNode = wrapper.get('.conference-message').element
+  const clientId = socketMock.send.mock.calls.find(([message]) => message.type === 'CHAT')[0].clientId
+  socketMock.onEvent({type:'CHAT_ACK',id:'saved',seq:1,client_id:clientId,user_id:'user-1',nickname:'小林',content:'重要消息',created_at:Date.now()})
+  await wrapper.vm.$nextTick()
+  expect(wrapper.get('.conference-message').element).toBe(pendingNode)
+  expect(wrapper.get('.conference-message').classes()).not.toContain('pending')
   expect(socketMock.microphone).not.toHaveBeenCalled()
   expect(socketMock.camera).not.toHaveBeenCalled()
   wrapper.unmount()
@@ -186,7 +192,7 @@ it('shows unread messages and preserves a scrolled-up chat position',async()=>{
   list.scrollTop=100
   socketMock.onEvent(message('2'));await wrapper.vm.$nextTick();await wrapper.vm.$nextTick()
   expect(list.scrollTop).toBe(100)
-  expect(wrapper.text()).toContain('有新消息')
+  expect(wrapper.text()).toContain('1 条新消息')
   await wrapper.get('.chat-new-messages').trigger('click')
   expect(list.scrollTop).toBe(1000)
   wrapper.unmount()

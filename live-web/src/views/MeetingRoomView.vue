@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LockKeyhole, LockKeyholeOpen, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LockKeyhole, LockKeyholeOpen, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
@@ -35,9 +35,10 @@ const shortcutsDialog=ref(false)
 const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
-const unread=ref(0),showNewMessages=ref(false),narrowScreen=ref(false)
+const unread=ref(0),waitingMessages=ref(0),narrowScreen=ref(false)
 const drawerOpen = computed(() => narrowScreen.value && sideOpen.value)
 const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || drawerOpen.value))
+let chatPosition = { top:0, following:true }
 let widthQuery
 let toolbarTouch = null, toolbarSwiped = false
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
@@ -94,17 +95,42 @@ function preventSwipeClick(event) {
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function nearChatBottom(){const list=chatList.value;return !list || list.scrollHeight-list.scrollTop-list.clientHeight<=80}
-function scrollChatBottom(){if(chatList.value)chatList.value.scrollTop=chatList.value.scrollHeight;showNewMessages.value=false}
-function onChatScroll(){if(nearChatBottom())showNewMessages.value=false}
+function scrollChatBottom() {
+  if (!chatVisible.value || !chatList.value) return
+  chatList.value.scrollTop = chatList.value.scrollHeight
+  waitingMessages.value = 0
+}
+function onChatScroll(){if(chatVisible.value && nearChatBottom())waitingMessages.value=0}
+function jumpToLatest() {
+  scrollChatBottom()
+  chatList.value?.focus({ preventScroll:true })
+}
+function messageKey(message) {
+  return message.client_id ? `${message.user_id}:${message.client_id}` : message.id
+}
 function addMessage(message,incoming=false){
   if(!message?.id || messages.value.some(item=>item.id===message.id))return
-  const nearBottom=nearChatBottom()
+  const following = chatVisible.value ? nearChatBottom() : chatPosition.following
   messages.value.push(message);messages.value.sort((a,b)=>a.seq-b.seq)
-  if(incoming && message.user_id!==user.current?.id && !chatVisible.value)unread.value++
-  if(incoming && message.user_id!==user.current?.id)announce(`${message.nickname || '成员'}发来一条消息`)
-  nextTick(()=>{if(chatVisible.value && nearBottom)scrollChatBottom();else if(chatVisible.value && incoming)showNewMessages.value=true})
+  if (incoming && message.user_id !== user.current?.id) {
+    if (!chatVisible.value) unread.value++
+    if (!following) waitingMessages.value++
+    announce(`${message.nickname || '成员'}发来一条消息`)
+  }
+  if (chatVisible.value && following) nextTick(scrollChatBottom)
 }
-watch(chatVisible,visible=>{if(visible)unread.value=0})
+watch(chatVisible, (visible, wasVisible) => {
+  if (!visible && wasVisible && chatList.value) {
+    chatPosition = { top:chatList.value.scrollTop, following:nearChatBottom() }
+  }
+  if (!visible) return
+  unread.value = 0
+  nextTick(() => {
+    if (!chatVisible.value || !chatList.value) return
+    if (chatPosition.following) scrollChatBottom()
+    else chatList.value.scrollTop = chatPosition.top
+  })
+})
 function clearPendingTimer(id){clearTimeout(pendingTimers.get(id));pendingTimers.delete(id)}
 function sendPending(item){
   clearPendingTimer(item.client_id)
@@ -114,7 +140,21 @@ function sendPending(item){
   return true
 }
 function retryMessage(item){if(!item)return;if(connection.value!=='connected'){flash('连接已断开，请稍后重试');return}sendPending(item)}
-async function history(){try{const rows=await api(`/api/meetings/${number}/messages`);for(const row of rows)addMessage(row)}catch(e){flash(requestError(e))}}
+async function history() {
+  try {
+    const rows = await api(`/api/meetings/${number}/messages`)
+    const present = new Set(messages.value.map(message => message.id))
+    const missing = rows.filter(row => {
+      if (!row?.id || present.has(row.id)) return false
+      present.add(row.id)
+      return true
+    })
+    if (!missing.length) return
+    const following = chatVisible.value && nearChatBottom()
+    messages.value = [...messages.value, ...missing].sort((a, b) => a.seq - b.seq)
+    if (following) nextTick(scrollChatBottom)
+  } catch (error) { flash(requestError(error)) }
+}
 function handleEvent(event){
   if (event.type === 'JOINED' && typeof event.hostUserId === 'string') {
     meeting.value.hostUserId = event.hostUserId
@@ -252,6 +292,7 @@ function sendChat(){
   const clientId=globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
   pending.value.push({client_id:clientId,user_id:user.current.id,content,nickname:localMember.value?.nickname||meeting.value.nickname,created_at:Date.now(),isPending:true})
   sendPending(pending.value[pending.value.length-1]);draft.value=''
+  nextTick(scrollChatBottom)
 }
 function sendHostAction(action) {
   if (!isHost.value) return
@@ -397,10 +438,12 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
             <div v-if="!members.length" class="panel-empty">正在同步成员…</div>
           </template>
           <template #chat>
-            <div class="chat-scroll-wrap"><div ref="chatList" class="conference-chat" @scroll="onChatScroll">
+            <div class="chat-scroll-wrap"><div ref="chatList" class="conference-chat" tabindex="0" role="region" aria-label="消息记录" @scroll="onChatScroll">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
-              <TransitionGroup name="chat-motion" tag="div"><div v-for="message in chatMessages" :key="message.id || message.client_id" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div></TransitionGroup>
-            </div><button v-if="showNewMessages" class="chat-new-messages" @click="scrollChatBottom">有新消息 ↓</button></div>
+              <TransitionGroup name="chat-motion" tag="div"><div v-for="message in chatMessages" :key="messageKey(message)" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div></TransitionGroup>
+            </div><Transition name="chat-jump"><button v-if="waitingMessages" class="chat-new-messages" @click="jumpToLatest">
+              <ArrowDown :size="14" /> {{ waitingMessages > 99 ? '99+' : waitingMessages }} 条新消息
+            </button></Transition></div>
             <div v-if="draft.length>=900" class="chat-counter" aria-live="polite">还可输入 {{ 1000-draft.length }} 字</div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>

@@ -279,6 +279,39 @@ test('the mobile drawer follows a drag, snaps back and restores keyboard focus',
   await expect(more).toBeFocused()
 })
 
+test('chat opens at the latest message and keeps the reading position across tabs', async ({ page }) => {
+  const connections = await mockBackend(page)
+  await page.goto('/meeting/123456789')
+  await expect(page.locator('.connection-status')).toHaveClass(/\bconnected\b/)
+  const chatTab = page.getByRole('tab', { name: /聊天/ })
+  const membersTab = page.getByRole('tab', { name: /成员/ })
+  const chat = page.getByRole('region', { name: '消息记录' })
+  function receiveMessage(seq) {
+    connections[0].send(JSON.stringify({ type:'CHAT', id:`msg-${seq}`, seq,
+      user_id:`colleague-${seq % 2}`, nickname:`同事 ${seq % 2 + 1}`, content:`会议消息 ${seq}`, created_at:Date.now() }))
+  }
+  for (let seq = 1; seq <= 28; seq++) receiveMessage(seq)
+  await expect(chatTab).toContainText('28')
+  await chatTab.click()
+  const distanceFromBottom = () => chat.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)
+  await expect.poll(distanceFromBottom).toBeLessThanOrEqual(2)
+
+  await chat.evaluate(el => { el.scrollTop = 104 })
+  await membersTab.click()
+  receiveMessage(29)
+  receiveMessage(30)
+  await expect(chatTab).toContainText('2')
+  await chatTab.click()
+  await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBe(104)
+  const jump = page.getByRole('button', { name:'2 条新消息' })
+  await expect(jump).toBeVisible()
+  if(process.env.INTERACTION_SCREENSHOTS)await page.screenshot({path:'../output/interaction-chat.png',animations:'disabled'})
+  await jump.click()
+  await expect.poll(distanceFromBottom).toBeLessThanOrEqual(2)
+  await expect(jump).toBeHidden()
+  await expect(chat).toBeFocused()
+})
+
 for(const viewport of [{width:375,height:667},{width:667,height:375},{width:1280,height:800}]){
   test(`meeting controls fit ${viewport.width}x${viewport.height}`,async({page})=>{
     await page.setViewportSize(viewport)

@@ -736,8 +736,21 @@ span.line.rise { display: block; }
 .panel-empty { padding: 28px 10px; font-size: 13px; color: var(--room-muted); text-align: center; }
 
 .chat-scroll-wrap { position:relative; flex:1; min-height:0; }
-.conference-chat { height:100%; min-height: 0; padding: 6px 16px 12px; overflow: auto; }
-.chat-new-messages { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); padding:6px 12px; border:1px solid var(--room-line); border-radius:20px; background:var(--room-raise); color:var(--room-text); font-size:12px; white-space:nowrap; }
+.conference-chat { height:100%; min-height:0; padding:6px 16px 12px; overflow:auto; overscroll-behavior:contain; }
+.conference-chat:focus-visible { outline-offset:-3px; }
+.chat-new-messages {
+  position:absolute; bottom:12px; left:50%; display:flex; align-items:center; gap:6px; transform:translateX(-50%);
+  min-height:34px; padding:6px 12px; border:1px solid #336451; border-radius:20px;
+  background:#1c392f; color:#dbf6e9; font-size:12px; font-weight:600; white-space:nowrap;
+  box-shadow:0 5px 12px #0005;
+}
+.chat-new-messages:hover { background:#244737; }
+.chat-new-messages svg { color:var(--presence-bright); }
+.chat-jump-enter-active, .chat-jump-leave-active {
+  transition:opacity var(--motion-instant) linear, transform var(--motion-instant) var(--motion-ease);
+}
+.chat-jump-enter-from, .chat-jump-leave-to { opacity:0; transform:translate(-50%, 4px); }
+.chat-jump-leave-active { pointer-events:none; }
 .unread-badge { display:inline-grid; place-items:center; min-width:19px; height:19px; padding:0 4px; border-radius:10px; background:var(--presence); color:#fff !important; animation:unread-pop var(--motion-transition) var(--motion-ease); }
 .mobile-unread { color:var(--presence-bright); }
 @keyframes unread-pop { 50% { transform:scale(1.12); } }
@@ -900,6 +913,8 @@ span.line.rise { display: block; }
   .unread-badge { animation:none; }
   .chat-motion-enter-active { transition:opacity var(--motion-instant) linear; }
   .chat-motion-enter-from { transform:none; }
+  .chat-jump-enter-active, .chat-jump-leave-active { transition:opacity var(--motion-instant) linear !important; }
+  .chat-jump-enter-from, .chat-jump-leave-to { transform:translateX(-50%); }
   .meeting-control.mute-feedback .control-symbol { animation:none; }
   .meeting-control:active:not(:disabled) .control-symbol { transform:none; }
   .tile-motion-move, .tile-motion-enter-active, .tile-motion-leave-active { transition:opacity var(--motion-instant) linear; }
