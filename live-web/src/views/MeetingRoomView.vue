@@ -22,6 +22,7 @@ import { groupChat } from '../chatText'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
+const entering = ref(initialSelection !== null)
 const meeting=ref(null),loading=ref(true),fatal=ref(''),notice=ref(''),connection=ref('connecting'),mediaState=ref('connecting'),mediaError=ref('')
 const announcement=ref('')
 const room=shallowRef(null),members=ref([]),messages=ref([]),pending=ref([]),draft=ref(''),panel=ref('members'),menu=ref(''),renameTarget=ref(null),renameValue=ref('')
@@ -327,7 +328,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
         </div>
       </header>
       <div v-if="connection==='reconnecting' || mediaState==='reconnecting'" class="connection-banner" role="status">正在重新连接，连接恢复后可继续发送消息。</div>
-      <div class="conference-layout">
+      <div class="conference-layout" :class="{ entering }" @animationend.self="entering=false">
         <section class="conference-main">
           <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number" @invite="copy(inviteText,'邀请信息已复制')"/>
           <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>

@@ -21,7 +21,9 @@ async function mockBackend(page,{hostControls=false}={}){
     await route.fulfill({status,headers:{'Access-Control-Allow-Origin':'*'},contentType:'application/json',body:JSON.stringify(data)})
   })
   await page.route('**/node_modules/.vite/deps/livekit-client.js*',route=>route.fulfill({path:fileURLToPath(new URL('./fake-livekit.js',import.meta.url)),contentType:'text/javascript'}))
+  const connections = []
   await page.routeWebSocket('**/ws/meetings',socket=>{
+    connections.push(socket)
     socket.onMessage(raw=>{
       const event=JSON.parse(raw)
       if(event.type==='JOIN'){
@@ -34,6 +36,7 @@ async function mockBackend(page,{hostControls=false}={}){
       if(event.type==='CHAT')socket.send(JSON.stringify({type:'CHAT_ACK',id:'message-1',seq:1,user_id:'user-1',nickname:'测试成员',client_id:event.clientId,content:event.content,created_at:Date.now()}))
     })
   })
+  return connections
 }
 
 async function tabTo(page,selector){
@@ -127,6 +130,48 @@ test('lobby theme follows the system and keeps an explicit mobile choice', async
   await appearance.selectOption('system')
   await expect(root).toHaveAttribute('data-theme', 'light')
 })
+
+for (const reducedMotion of ['no-preference', 'reduce']) {
+  test(`meeting arrival respects ${reducedMotion} motion and does not replay on reconnect`, async ({ page }) => {
+    const connections = await mockBackend(page)
+    await page.emulateMedia({ reducedMotion })
+    await page.addInitScript(() => {
+      window.meetingEntryAnimations = []
+      document.addEventListener('animationstart', event => {
+        if (['join-pulse', 'meeting-arrive'].includes(event.animationName)) {
+          window.meetingEntryAnimations.push([event.animationName, getComputedStyle(event.target).animationDuration])
+        }
+      })
+    })
+    await page.goto('/join/123456789')
+    await page.getByLabel('会议密码').fill('1234')
+    await page.getByRole('button', { name: '加入会议', exact: true }).click()
+    await expect(page).toHaveURL(/\/meeting\/123456789/)
+    const layout = page.locator('.conference-layout')
+    await expect(layout).toBeVisible()
+
+    const readAnimations = () => page.evaluate(() => window.meetingEntryAnimations)
+    const expected = reducedMotion === 'reduce'
+      ? [['meeting-arrive', '0.12s']]
+      : [['join-pulse', '0.2s'], ['meeting-arrive', '0.2s']]
+    await expect.poll(readAnimations).toEqual(expected)
+    await expect(layout).not.toHaveClass(/entering/)
+
+    if (reducedMotion === 'no-preference') {
+      const status = page.locator('.connection-status')
+      await expect(status).toHaveClass(/connected/)
+      await connections[0].close({ code: 1012, reason: 'Simulate network reconnect' })
+      await expect.poll(() => connections.length).toBe(2)
+      await expect(status).toHaveClass(/connected/)
+      expect(await readAnimations()).toEqual(expected)
+    }
+
+    await page.reload()
+    await expect(layout).toBeVisible()
+    await expect(layout).not.toHaveClass(/entering/)
+    expect(await readAnimations()).toEqual([])
+  })
+}
 
 test('meeting number, join validation and keyboard meeting flow',async({page})=>{
   await mockBackend(page)

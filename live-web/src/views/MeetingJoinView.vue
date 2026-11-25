@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight, LockKeyhole, Mic, Video } from 'lucide-vue-next'
 import { api } from '../api'
@@ -11,10 +11,14 @@ import { useJoinDevices } from '../devicePreferences'
 import DeviceCheck from '../components/DeviceCheck.vue'
 import LogoMark from '../components/LogoMark.vue'
 import { rememberMeeting } from '../recentMeetings'
+import { useMotion } from '../useMotion'
 
 const route=useRoute(),router=useRouter(),user=useUser(),service=useServiceHealth(),joinDevices=useJoinDevices()
 const meeting=ref(null),loading=ref(true),joining=ref(false),error=ref(''),errorKind=ref(''),joinError=ref(''),nickname=ref(''),password=ref('')
 const deviceCheck=ref(null),deviceSelection=ref({microphoneOn:false,cameraOn:false})
+const { reduced } = useMotion()
+const admitted = ref(false), entryRing = ref(null)
+let leaving = false
 let requestId=0
 const canRejoin = computed(() => meeting.value?.locked === true && meeting.value?.canRejoinLockedMeeting === true)
 const state=computed(()=>{
@@ -40,20 +44,33 @@ async function load(){
 watch(()=>user.current?.nickname,name=>{if(name && !nickname.value)nickname.value=name},{immediate:true})
 watch(()=>user.current?.id,()=>{if(meeting.value)load()})
 watch(()=>service.status,status=>{if(status==='ready')load()},{immediate:true})
+onBeforeUnmount(() => { leaving = true })
 async function join(){
+  if (joining.value) return
   deviceCheck.value?.release()
   if(!user.require(join))return
+  const number = route.params.number
   joining.value=true;joinError.value=''
   try{
-    await api(`/api/meetings/${route.params.number}/join`,{method:'POST',body:{nickname:nickname.value||user.current.nickname,password:password.value}})
-    rememberMeeting({number:route.params.number,title:meeting.value?.title})
-    joinDevices.prepare(route.params.number,deviceSelection.value);password.value='';router.push(`/meeting/${route.params.number}`)
+    await api(`/api/meetings/${number}/join`,{method:'POST',body:{nickname:nickname.value||user.current.nickname,password:password.value}})
+    if (leaving || route.params.number !== number) return
+    if (!reduced.value && !document.hidden) {
+      admitted.value = true
+      await nextTick()
+      const pulse = entryRing.value?.getAnimations?.()[0]
+      if (pulse) await pulse.finished.catch(() => {})
+    }
+    if (leaving || route.params.number !== number) return
+    rememberMeeting({number,title:meeting.value?.title})
+    joinDevices.prepare(number,deviceSelection.value)
+    password.value=''
+    await router.push(`/meeting/${number}`)
   }catch(e){
     if(e.status===423)errorKind.value='locked'
     else if(e.status===409)errorKind.value='ended'
     else if(e.status===401)errorKind.value='login'
     else joinError.value=requestError(e)
-  }finally{joining.value=false}
+  }finally{joining.value=false;admitted.value=false}
 }
 function retry(){if(user.loadError)user.load();if(service.status==='timeout')service.start();else load()}
 </script>
@@ -65,7 +82,10 @@ function retry(){if(user.loadError)user.load();if(service.status==='timeout')ser
       <div class="join-layout">
         <div class="join-intro">
           <h1>{{ meeting?.title || '加入会议' }}</h1>
-          <div class="room-number" aria-label="会议号">{{ groupNumber(route.params.number) }}</div>
+          <div class="room-number" aria-label="会议号">
+            <span class="join-signal" :class="{ admitted }" aria-hidden="true"><span v-if="admitted" ref="entryRing" class="join-signal-ring"></span></span>
+            {{ groupNumber(route.params.number) }}
+          </div>
           <p v-if="meeting" class="join-intro-meta">{{ meeting.ownerName }} 发起的会议</p>
         </div>
         <section class="join-card">
