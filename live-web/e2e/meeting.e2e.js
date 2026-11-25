@@ -235,6 +235,50 @@ test('the mobile members panel can lock and unlock the meeting', async ({page}) 
   await expect(page.getByRole('img',{name:'会议已锁定'})).toHaveCount(0)
 })
 
+test('the mobile drawer follows a drag, snaps back and restores keyboard focus', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 })
+  await mockBackend(page)
+  await page.goto('/meeting/123456789')
+  const more = page.getByRole('button', { name: '更多会议功能' })
+  const menuItem = page.getByRole('button', { name: '成员（1）' })
+  async function showMembers() {
+    await more.click()
+    await menuItem.click()
+  }
+  await showMembers()
+  const drawer = page.getByRole('dialog', { name: '会议互动' })
+  const members = drawer.getByRole('tab', { name: /成员/ })
+  const chat = drawer.getByRole('tab', { name: '聊天' })
+  const handle = drawer.getByRole('button', { name: '关闭互动面板' })
+  await expect(members).toBeFocused()
+  if(process.env.INTERACTION_SCREENSHOTS)await page.screenshot({path:'../output/interaction-drawer.png',animations:'disabled'})
+  await page.keyboard.press('ArrowRight')
+  await expect(chat).toBeFocused()
+  await expect(drawer.getByRole('tabpanel', { name: '聊天' })).toBeVisible()
+  await drawer.getByRole('textbox', { name: '会议消息' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeHidden()
+  await expect(more).toBeFocused()
+
+  await showMembers()
+  const position = () => drawer.evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).m42)
+  await expect.poll(position).toBe(0)
+  async function dragHandle(distance) {
+    const box = await handle.boundingBox()
+    const x = box.x + box.width / 2, y = box.y + box.height / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x, y + distance, { steps: 5 })
+    await expect.poll(position).toBeGreaterThanOrEqual(distance - 2)
+    await page.mouse.up()
+  }
+  await dragHandle(32)
+  await expect.poll(position).toBe(0)
+  await dragHandle(95)
+  await expect(drawer).toBeHidden()
+  await expect(more).toBeFocused()
+})
+
 for(const viewport of [{width:375,height:667},{width:667,height:375},{width:1280,height:800}]){
   test(`meeting controls fit ${viewport.width}x${viewport.height}`,async({page})=>{
     await page.setViewportSize(viewport)

@@ -7,6 +7,7 @@ import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
 import MeetingMedia from '../components/MeetingMedia.vue'
+import MeetingSidePanel from '../components/MeetingSidePanel.vue'
 import LogoMark from '../components/LogoMark.vue'
 import { groupNumber } from '../format'
 import { mediaError as explainMediaError, requestError } from '../mediaErrors'
@@ -35,9 +36,10 @@ const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 const unread=ref(0),showNewMessages=ref(false),narrowScreen=ref(false)
-const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || sideOpen.value))
+const drawerOpen = computed(() => narrowScreen.value && sideOpen.value)
+const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || drawerOpen.value))
 let widthQuery
-let touchStartY=null
+let toolbarTouch = null, toolbarSwiped = false
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
 let membersInitialized=false
 const pendingTimers=new Map()
@@ -68,14 +70,26 @@ function flash(value){notice.value=value;announce(value);clearTimeout(noticeTime
 const mediaDevices=useMeetingDevices({room,mediaState,notify:flash,initial:deviceDefaults})
 function openDeviceMenu(kind){deviceMenu.value=deviceMenu.value===kind?'':kind;if(deviceMenu.value)mediaDevices.refresh()}
 async function selectDevice(kind,id){if(await mediaDevices.choose(kind,id))deviceMenu.value=''}
-function openPanel(value){panel.value=value;sideOpen.value=true;moreOpen.value=false;deviceMenu.value=''}
-function closePanel(){sideOpen.value=false;nextTick(()=>moreButton.value?.focus())}
-function swipeStart(event){if(event.pointerType==='touch')touchStartY=event.clientY}
-function swipeEnd(event,direction){
-  if(touchStartY===null || event.pointerType!=='touch')return
-  const distance=event.clientY-touchStartY;touchStartY=null
-  if(direction==='up' && distance < -50)openPanel('members')
-  if(direction==='down' && distance > 50)closePanel()
+function openPanel(value){panel.value=value;sideOpen.value=narrowScreen.value;moreOpen.value=false;deviceMenu.value='';menu.value=''}
+function closePanel(){sideOpen.value=false;menu.value='';nextTick(()=>moreButton.value?.focus({preventScroll:true}))}
+function startToolbarSwipe(event) {
+  toolbarSwiped = false
+  toolbarTouch = event.pointerType === 'touch' && narrowScreen.value ? { id: event.pointerId, y: event.clientY } : null
+}
+function finishToolbarSwipe(event) {
+  if (toolbarTouch?.id !== event.pointerId) return
+  const upward = toolbarTouch.y - event.clientY > 50
+  toolbarTouch = null
+  if (upward) {
+    toolbarSwiped = true
+    openPanel('members')
+  }
+}
+function preventSwipeClick(event) {
+  if (!toolbarSwiped || event.detail === 0) return
+  toolbarSwiped = false
+  event.preventDefault()
+  event.stopPropagation()
 }
 const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
@@ -290,8 +304,9 @@ function onShortcut(event){
   const typing=!!target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
   if(event.key==='Escape'){
     if(shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value)return
+    if(drawerOpen.value){event.preventDefault();closePanel();return}
     if(typing)return
-    if(sideOpen.value)closePanel();else if(panel.value==='chat')panel.value='members'
+    if(panel.value==='chat')panel.value='members'
     deviceMenu.value='';menu.value='';moreOpen.value=false;return
   }
   if(!meeting.value || fatal.value || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.repeat || shortcutsDialog.value || renameTarget.value || obsDialog.value || inviteDialog.value || confirmKind.value || typing)return
@@ -302,7 +317,7 @@ function onShortcut(event){
   const kind=({m:'mic',v:'camera',s:'screen'})[key]
   if(kind && (kind!=='screen' || screenShareSupported)){event.preventDefault();device(kind)}
 }
-function updateWidth(){narrowScreen.value=!!widthQuery?.matches}
+function updateWidth(){narrowScreen.value=!!widthQuery?.matches;if(!narrowScreen.value)sideOpen.value=false}
 onMounted(()=>{widthQuery=window.matchMedia?.('(max-width: 900px)');updateWidth();widthQuery?.addEventListener?.('change',updateWidth);document.addEventListener('keydown',onShortcut);load()})
 onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);widthQuery?.removeEventListener?.('change',updateWidth);document.removeEventListener('keydown',onShortcut);for(const id of pendingTimers.keys())clearPendingTimer(id);socket?.close();room.value?.disconnect()})
 </script>
@@ -312,7 +327,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
     <div v-if="loading" class="conference-full-state"><span class="loader"></span> 正在进入会议…</div>
     <div v-else-if="fatal" class="conference-full-state"><strong>{{ fatal }}</strong><button class="meeting-button outline" @click="router.push('/')">返回首页</button></div>
     <template v-else-if="meeting">
-      <header class="conference-header">
+      <header class="conference-header" :inert="drawerOpen">
         <div class="conference-title">
           <button class="conference-back" aria-label="离开会议并返回首页" @click="confirmKind='leave'"><ArrowLeft :size="19"/></button>
           <LogoMark />
@@ -329,12 +344,13 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
       </header>
       <div v-if="connection==='reconnecting' || mediaState==='reconnecting'" class="connection-banner" role="status">正在重新连接，连接恢复后可继续发送消息。</div>
       <div class="conference-layout" :class="{ entering }" @animationend.self="entering=false">
-        <section class="conference-main">
+        <section class="conference-main" :inert="drawerOpen">
           <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number" @invite="copy(inviteText,'邀请信息已复制')"/>
           <div v-if="mediaError" class="conference-alert">{{ mediaError }} <button @click="connectMedia">重新连接</button></div>
           <div v-else-if="mediaState==='reconnecting'" class="conference-alert">音视频正在重新连接…</div>
           <div v-else-if="['poor','lost'].includes(networkQuality)" class="conference-alert" role="status">{{ qualityReduced ? '网络不稳定，已请求降低画质。' : '网络不稳定，请检查网络连接。' }}</div>
-          <div class="conference-toolbar" @pointerdown="swipeStart" @pointerup="swipeEnd($event,'up')" @pointercancel="touchStartY=null">
+          <div class="conference-toolbar" @pointerdown="startToolbarSwipe" @pointerup="finishToolbarSwipe"
+            @pointercancel="toolbarTouch=null" @click.capture="preventSwipeClick">
             <div class="toolbar-controls">
               <div class="device-control-wrap"><button class="meeting-control" :class="{ enabled:microphone, 'mute-feedback':muteFeedback }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('mic')" @animationend="muteFeedback=false" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'"><span class="control-symbol"><Transition name="control-icon"><Mic v-if="microphone" key="on" :size="20"/><MicOff v-else key="off" :size="20"/></Transition></span><span>{{ microphone ? '麦克风' : '麦克风关闭' }}</span></button><button class="device-arrow" aria-label="选择麦克风和扬声器" :aria-expanded="deviceMenu==='audioinput'" @click="openDeviceMenu('audioinput')"><ChevronUp :size="14"/></button>
                 <div v-if="deviceMenu==='audioinput'" class="device-popover"><strong>麦克风</strong><button :class="{chosen:!mediaDevices.selected.microphoneId}" @click="selectDevice('audioinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audioinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.microphoneId===item.deviceId}" @click="selectDevice('audioinput',item.deviceId)">{{ item.label || `麦克风 ${index+1}` }}</button><template v-if="mediaDevices.speakerSupported"><strong>扬声器</strong><button :class="{chosen:!mediaDevices.selected.speakerId}" @click="selectDevice('audiooutput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='audiooutput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.speakerId===item.deviceId}" @click="selectDevice('audiooutput',item.deviceId)">{{ item.label || `扬声器 ${index+1}` }}</button></template></div>
@@ -350,14 +366,9 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
             </div>
           </div>
         </section>
-        <button v-if="sideOpen" class="side-backdrop" aria-label="关闭互动面板" @click="closePanel"></button>
-        <aside id="meeting-side" class="conference-side" :class="{'mobile-open':sideOpen}">
-          <button class="drawer-handle" aria-label="关闭互动面板" @pointerdown.stop="swipeStart" @pointerup.stop="swipeEnd($event,'down')" @pointercancel="touchStartY=null" @click="closePanel"><span></span></button>
-          <div class="conference-tabs" role="tablist">
-            <button role="tab" :aria-selected="panel==='members'" :class="{active:panel==='members'}" @click="panel='members'"><Users :size="16"/> 成员 <span>{{ members.length }}</span></button>
-            <button role="tab" :aria-selected="panel==='chat'" :class="{active:panel==='chat'}" @click="panel='chat'"><MessageSquare :size="16"/> 聊天 <span v-if="unread" :key="unread" class="unread-badge" :aria-label="`${unread} 条未读消息`">{{ unread>99 ? '99+' : unread }}</span></button>
-          </div>
-          <div v-if="panel==='members'" class="members-panel">
+        <MeetingSidePanel v-model:tab="panel" :compact="narrowScreen" :drawer-open="drawerOpen"
+          :member-count="members.length" :unread="unread" @close="closePanel">
+          <template #members>
             <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
             <div v-if="isHost && supportsHostControls" class="host-controls" aria-label="主持人操作" role="group">
               <button :disabled="connection !== 'connected' || members.length < 2" @click="confirmKind='muteAll'">
@@ -384,8 +395,8 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
               </div>
             </div>
             <div v-if="!members.length" class="panel-empty">正在同步成员…</div>
-          </div>
-          <template v-else>
+          </template>
+          <template #chat>
             <div class="chat-scroll-wrap"><div ref="chatList" class="conference-chat" @scroll="onChatScroll">
               <div v-if="!messages.length && !pending.length" class="chat-empty"><MessageSquare :size="22"/><strong>还没有消息</strong><span>会议消息只对当前成员可见。</span></div>
               <TransitionGroup name="chat-motion" tag="div"><div v-for="message in chatMessages" :key="message.id || message.client_id" class="conference-message" :class="{pending:message.isPending,grouped:message.grouped}"><span v-if="!message.grouped" class="message-avatar" :style="avatarStyle(message.user_id)" aria-hidden="true">{{ message.nickname?.slice(0,1) }}</span><div><strong v-if="!message.grouped">{{ message.nickname }}</strong><time>{{ message.isPending ? (message.failed ? '未发送' : '发送中') : time(message.created_at) }}</time><button v-if="message.failed" class="retry-message" @click="retryMessage(pending.find(item=>item.client_id===message.client_id))">重发</button></div><p><template v-for="(part,index) in message.parts" :key="index"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></p></div></TransitionGroup>
@@ -393,7 +404,7 @@ onBeforeUnmount(()=>{leaving=true;mediaGeneration++;clearTimeout(noticeTimer);wi
             <div v-if="draft.length>=900" class="chat-counter" aria-live="polite">还可输入 {{ 1000-draft.length }} 字</div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
           </template>
-        </aside>
+        </MeetingSidePanel>
       </div>
       <ModalDialog :open="!!renameTarget" labelledby="rename-title" dialog-class="meeting-dialog" @close="renameTarget=null">
         <h2 id="rename-title">修改会议昵称</h2><p class="muted">此昵称只在当前会议中显示。</p><form class="form-stack" @submit.prevent="rename"><label>会议昵称<input v-model.trim="renameValue" maxlength="40" required/></label><button class="meeting-button primary full">保存昵称 <Check :size="17"/></button></form>

@@ -95,19 +95,24 @@ it('does not start opted-in devices if the user is removed while media is connec
 })
 
 it('opens and closes the mobile interaction drawer and explains unsupported sharing', async () => {
+  vi.stubGlobal('matchMedia', query => ({ matches: query === '(max-width: 900px)' }))
   const wrapper=mount(MeetingRoomView,{attachTo:document.body,global:{stubs:{MeetingMedia:true,LogoMark:true}}})
-  await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
-  expect(wrapper.find('[aria-label="共享屏幕"]').exists()).toBe(false)
-  await wrapper.get('[aria-label="更多会议功能"]').trigger('click')
-  expect(wrapper.text()).toContain('当前浏览器不支持屏幕共享')
-  await wrapper.findAll('.mobile-more-menu button').find(button=>button.text().includes('聊天')).trigger('click')
-  expect(wrapper.get('#meeting-side').classes()).toContain('mobile-open')
-  expect(wrapper.find('input[aria-label="会议消息"]').exists()).toBe(true)
-  await wrapper.get('.drawer-handle').trigger('click')
-  expect(wrapper.get('#meeting-side').classes()).not.toContain('mobile-open')
-  await wrapper.vm.$nextTick()
-  expect(document.activeElement).toBe(wrapper.get('[aria-label="更多会议功能"]').element)
-  wrapper.unmount()
+  try {
+    await vi.waitFor(()=>expect(wrapper.text()).toContain('项目会议'))
+    expect(wrapper.find('[aria-label="共享屏幕"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="更多会议功能"]').trigger('click')
+    expect(wrapper.text()).toContain('当前浏览器不支持屏幕共享')
+    await wrapper.findAll('.mobile-more-menu button').find(button=>button.text().includes('聊天')).trigger('click')
+    expect(wrapper.get('#meeting-side').classes()).toContain('mobile-open')
+    expect(wrapper.find('input[aria-label="会议消息"]').exists()).toBe(true)
+    await wrapper.get('.drawer-handle').trigger('click')
+    expect(wrapper.get('#meeting-side').classes()).not.toContain('mobile-open')
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement).toBe(wrapper.get('[aria-label="更多会议功能"]').element)
+  } finally {
+    wrapper.unmount()
+    vi.unstubAllGlobals()
+  }
 })
 
 it('restores a previously enabled microphone after a full media reconnect',async()=>{
