@@ -6,10 +6,7 @@ on:
     types: [completed]
 
 permissions:
-  actions: read
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   # A skipped PR workflow must not cancel a successful main-branch deployment.
@@ -17,12 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      current: ${{ steps.revision.outputs.current }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,26 +55,35 @@ jobs:
           npm run build
       - uses: actions/configure-pages@v5
         if: steps.revision.outputs.current == 'true'
-      - id: upload
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: steps.revision.outputs.current == 'true'
         with:
           path: live-web/dist
-      - name: Wait for the Pages artifact to be listed
-        if: steps.revision.outputs.current == 'true'
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.current == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check the current main revision before publishing
+        id: revision
         env:
           GH_TOKEN: ${{ github.token }}
-          PAGES_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          artifacts="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages"
-          for attempt in {1..10}; do
-            if gh api "$artifacts" --jq '.artifacts[] | select(.expired == false).id' | grep -Fxq "$PAGES_ARTIFACT_ID"; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo '::error::The uploaded Pages artifact is not yet listed.'
-          exit 1
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$main_sha" = "$TESTED_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "A newer main commit exists; skipping this deployment."
+          fi
       - id: deployment
         if: steps.revision.outputs.current == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
