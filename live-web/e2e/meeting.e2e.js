@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 const meeting={number:'123456789',title:'测试会议',ownerName:'主持人',status:'OPEN',hasPassword:true,isOwner:false}
 
-async function mockBackend(page,{hostControls=false}={}){
+async function mockBackend(page,{hostControls=false,presentationTools=false,onMeetingMessage}={}){
   await page.route('**/api/**',async route=>{
     const url=new URL(route.request().url()),path=url.pathname,method=route.request().method()
     let status=200,data={}
@@ -27,17 +27,88 @@ async function mockBackend(page,{hostControls=false}={}){
     socket.onMessage(raw=>{
       const event=JSON.parse(raw)
       if(event.type==='JOIN'){
-        socket.send(JSON.stringify({type:'JOINED',...(hostControls ? {hostUserId:'user-1',locked:false} : {})}))
+        socket.send(JSON.stringify({type:'JOINED',presentationTools,...(hostControls ? {hostUserId:'user-1',locked:false} : {})}))
         const members=[{userId:'user-1',nickname:'测试成员',host:hostControls}]
         if(hostControls)members.push({userId:'user-2',nickname:'同事',host:false})
         socket.send(JSON.stringify({type:'MEMBERS',members}))
       }
       if(event.type==='SET_MEETING_LOCK' && hostControls)socket.send(JSON.stringify({type:'MEETING_LOCK_CHANGED',locked:event.locked}))
       if(event.type==='CHAT')socket.send(JSON.stringify({type:'CHAT_ACK',id:'message-1',seq:1,user_id:'user-1',nickname:'测试成员',client_id:event.clientId,content:event.content,created_at:Date.now()}))
+      onMeetingMessage?.(event,socket)
     })
   })
   return connections
 }
+
+test('presentation editor, media handoff, question export and screen point coordinates',async({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write'])
+  await page.setViewportSize({width:1280,height:780})
+  let presentation, sentPoint
+  function update(socket,values){
+    presentation={...presentation,...values,serverNow:Date.now()}
+    socket.send(JSON.stringify(presentation))
+  }
+  await mockBackend(page,{hostControls:true,presentationTools:true,onMeetingMessage(event,socket){
+    if(event.type==='SCREEN_POINT'){
+      sentPoint=event
+      socket.send(JSON.stringify(event))
+    }
+    if(event.action==='SAVE'){
+      update(socket,{
+        type:'PRESENTATION_STATE',agenda:event.agenda.map((row,index)=>({...row,id:`segment-${index}`,presenter:'测试成员'})),
+        currentId:'',nextId:'segment-0',invitedId:'',readyIds:[],skippedIds:[],editable:true,finished:false,
+        deadline:0,questions:[],
+      })
+    }
+    if(event.action==='INVITE')update(socket,{invitedId:event.segmentId,editable:false})
+    if(event.action==='ACCEPT')update(socket,{
+      currentId:event.segmentId,invitedId:'',nextId:'',deadline:Date.now()+300_000,
+      paceCounts:{following:2,slower:1,working:0},
+    })
+    if(event.action==='QUESTION')update(socket,{questions:[
+      {id:event.questionId,segmentId:event.segmentId,author:'测试成员',content:event.content,elapsedMs:8000},
+    ]})
+    if(event.action==='ANSWER')update(socket,{questions:presentation.questions.map(item=>({...item,answered:item.id===event.questionId}))})
+  }})
+  await page.goto('/meeting/123456789')
+  await page.getByRole('tab',{name:'汇报'}).click()
+  await page.getByRole('button',{name:'新建议程'}).click()
+  await page.getByLabel('环节名称').fill('设计评审')
+  await page.getByRole('button',{name:'保存议程'}).click()
+  await page.getByRole('button',{name:'邀请首位汇报人'}).click()
+  await expect(page.getByRole('heading',{name:'轮到你汇报了'})).toBeVisible()
+  await page.getByRole('button',{name:'确认并共享'}).click()
+  await expect(page.getByRole('button',{name:'停止共享'})).toBeVisible()
+  await expect(page.getByLabel('节奏反馈')).toContainText('请慢一点')
+  await expect(page.locator('.presentation-brief')).toContainText('设计评审')
+
+  await page.getByRole('button',{name:'标记位置'}).click()
+  const markTarget=page.getByRole('button',{name:'在共享画面中央放置标记'})
+  const rect=await markTarget.boundingBox()
+  await page.mouse.click(rect.x+rect.width*.29,rect.y+rect.height*.71)
+  await expect(page.locator('.screen-point-marker')).toBeVisible()
+  expect(sentPoint.trackSid).toBe('TR_test_screen')
+  expect(sentPoint.x).toBeCloseTo(.29,2)
+  expect(sentPoint.y).toBeCloseTo(.71,2)
+
+  await page.getByRole('button',{name:'提问',exact:true}).click()
+  await page.getByLabel('向「设计评审」提问').fill('什么时候验收？')
+  await page.getByRole('button',{name:'发送问题'}).click()
+  await expect(page.getByLabel('向「设计评审」提问')).toBeEmpty()
+  await page.getByRole('button',{name:'复制未回答问题'}).click()
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('[00:08] 测试成员　什么时候验收？')
+  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-desktop-check.png'})
+  await page.getByRole('button',{name:'标为已回答'}).click()
+  await expect(page.getByText('已回答',{exact:true})).toBeVisible()
+
+  await page.setViewportSize({width:390,height:780})
+  await page.locator('.presentation-brief').click()
+  const drawer=page.getByRole('dialog',{name:'会议互动'})
+  await expect(drawer.getByRole('tab',{name:'汇报'})).toBeFocused()
+  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-mobile-check.png',animations:'disabled'})
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.presentation-brief')).toBeFocused()
+})
 
 async function tabTo(page,selector){
   const target=page.locator(selector).first()

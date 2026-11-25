@@ -29,6 +29,12 @@ public class MeetingRateLimiter {
 
     public void join(String uid){acquire("join:"+uid,JOIN_LIMIT,JOIN_WINDOW,"入会尝试过于频繁，请稍后再试");}
     public void chat(String meetingId,String uid){acquire("chat:"+meetingId+":"+uid,CHAT_LIMIT,CHAT_WINDOW,"发送消息过于频繁，请稍后再试");}
+    public void presentation(String meetingId, String uid) {
+        acquire("presentation:" + meetingId + ":" + uid, CHAT_LIMIT, CHAT_WINDOW, "操作过于频繁，请稍后再试");
+    }
+    public void screenPoint(String meetingId, String uid) {
+        acquire("point:" + meetingId + ":" + uid, 8, CHAT_WINDOW, "画面标记过于频繁，请稍后再试");
+    }
 
     private synchronized void acquire(String key,int limit,long window,String message){
         long now=clock.getAsLong();

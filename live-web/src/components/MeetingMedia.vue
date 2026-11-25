@@ -3,14 +3,18 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { RoomEvent, Track } from 'livekit-client'
 import { ChevronLeft, ChevronRight, Mic, MicOff, MonitorUp, Pin, PinOff, Volume2 } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
+import ScreenShareVideo from './ScreenShareVideo.vue'
 import LogoMark from './LogoMark.vue'
 import { groupNumber } from '../format'
 import { connectionQualityLabel } from '../networkQuality'
 import { avatarStyle } from '../avatarColors'
 import { useSpeakerActivity } from '../useSpeakerActivity'
 
-const props=defineProps({room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String})
-const emit=defineEmits(['invite'])
+const props=defineProps({
+  room:Object,members:{type:Array,default:()=>[]},userId:String,mediaState:String,meetingNumber:String,
+  presenterId:String,canPoint:Boolean,points:Array,
+})
+const emit=defineEmits(['invite','point'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
 const tilesContainer=ref(null)
 const view=ref('gallery'),pinned=ref(''),screenFocus=ref(''),page=ref(1)
@@ -51,7 +55,7 @@ const tiles=computed(()=>{
       for(const publication of person.trackPublications.values()){
         if(publication.kind===Track.Kind.Audio && !publication.isMuted && (isObs || publication.source===Track.Source.Microphone))microphone=true
         if(!publication.track || publication.isMuted || publication.kind!==Track.Kind.Video)continue
-        if(publication.source===Track.Source.ScreenShare)screens.push({key:`screen-${person.identity}`,track:publication.track,name:member.nickname,screen:true,local:member.userId===props.userId,quality:person.connectionQuality || 'unknown'})
+        if(publication.source===Track.Source.ScreenShare)screens.push({key:`screen-${person.identity}`,track:publication.track,trackSid:publication.trackSid,userId:member.userId,name:member.nickname,screen:true,local:member.userId===props.userId,quality:person.connectionQuality || 'unknown'})
         else if(!camera || isObs)camera=publication.track
       }
     }
@@ -59,7 +63,13 @@ const tiles=computed(()=>{
   }
   return [...screens,...people]
 })
-const primary=computed(()=>tiles.value.find(tile=>tile.key===screenFocus.value) || tiles.value.find(tile=>tile.key===pinned.value) || tiles.value.find(tile=>tile.screen) || tiles.value.find(tile=>tile.speaking) || tiles.value[0])
+const primary=computed(()=>{
+  const recentScreen=tiles.value.find(tile=>tile.key===screenFocus.value)
+  const presenterScreen=tiles.value.find(tile=>tile.screen && tile.userId===props.presenterId)
+  if(recentScreen)return presenterScreen || recentScreen
+  return tiles.value.find(tile=>tile.key===pinned.value) || presenterScreen || tiles.value.find(tile=>tile.screen) ||
+    tiles.value.find(tile=>tile.userId===props.presenterId) || tiles.value.find(tile=>tile.speaking) || tiles.value[0]
+})
 const pageCount=computed(()=>view.value==='gallery' ? Math.max(1,Math.ceil(tiles.value.length/9)) : Math.max(1,Math.ceil((tiles.value.length-1)/8)))
 const visible=computed(()=>{
   if(view.value==='gallery')return tiles.value.slice((page.value-1)*9,page.value*9)
@@ -107,7 +117,9 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
       <div class="stage-views" aria-label="画面布局"><button :class="{active:view==='gallery'}" :aria-pressed="view==='gallery'" @click="setView('gallery')">画廊</button><button :class="{active:view==='speaker'}" :aria-pressed="view==='speaker'" @click="setView('speaker')">演讲者</button></div>
       <TransitionGroup ref="tilesContainer" tag="div" name="tile-motion" class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}" @before-leave="prepareTileLeave">
         <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" :data-tile-key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'speaking-primary':tile.speaking && speakers.recent.value===tile.userId, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
-          <MediaTile v-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
+          <ScreenShareVideo v-if="tile.screen" :track="tile.track" :track-sid="tile.trackSid" :points="points"
+            :can-point="canPoint && !!tile.trackSid && (view==='gallery' || tile.key===primary?.key)" @point="emit('point',$event)" />
+          <MediaTile v-else-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
           <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>
           <div v-if="tile.screen" class="tile-screen-label"><MonitorUp :size="14"/> {{ tile.name }}的屏幕</div><div v-else class="tile-name"><span>{{ tile.name }}{{ tile.local ? '（我）' : '' }}</span><span v-if="tile.host" class="tile-host">主持人</span><span v-if="tile.obs" class="tile-obs">OBS</span><Mic v-if="tile.microphone" :size="14"/><MicOff v-else class="mic-off" :size="14"/></div>

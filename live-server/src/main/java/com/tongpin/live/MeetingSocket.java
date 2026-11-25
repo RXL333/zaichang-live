@@ -6,6 +6,7 @@ import java.util.concurrent.ScheduledFuture;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.session.MapSessionRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,9 +26,10 @@ public class MeetingSocket extends TextWebSocketHandler {
     private final TaskScheduler scheduler;
     private final long hostReconnectDelayMs;
 
-    // The per-meeting monitor protects the two maps' values and preserves the order members arrive in.
+    // The per-meeting monitor protects these maps' values and preserves member arrival order.
     private final Map<String, LinkedHashMap<String, Set<WebSocketSession>>> active = new ConcurrentHashMap<>();
     private final Map<String, HostHandoff> handoffs = new ConcurrentHashMap<>();
+    private final Map<String, MeetingPresentation> presentations = new ConcurrentHashMap<>();
 
     private static class HostHandoff {
         final String host;
@@ -51,10 +53,16 @@ public class MeetingSocket extends TextWebSocketHandler {
     }
 
     @Override protected void handleTextMessage(WebSocketSession socket, TextMessage message) {
+        String errorType = "ERROR";
+        String errorAction = "";
         try {
             if (message.getPayloadLength() > 10000) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "消息过长");
             Map<?,?> data = mapper.readValue(message.getPayload(), Map.class);
             String type = Db.text(data.get("type"));
+            if ("PRESENTATION".equals(type) || "SCREEN_POINT".equals(type)) {
+                errorType = "PRESENTATION_ERROR";
+                if ("ACCEPT".equals(data.get("action"))) errorAction = "ACCEPT";
+            }
             if ("JOIN".equals(type)) {
                 join(socket, Db.checked(data.get("number"), 12, "会议号"), Db.text(data.get("authToken")));
                 return;
@@ -71,6 +79,8 @@ public class MeetingSocket extends TextWebSocketHandler {
                 switch (type) {
                     case "PING" -> send(socket, Map.of("type", "PONG", "timestamp", Db.now()));
                     case "CHAT" -> chat(socket, id, uid, data);
+                    case "PRESENTATION" -> handlePresentation(id, uid, meeting, data);
+                    case "SCREEN_POINT" -> screenPoint(id, uid, data);
                     case "RENAME" -> {
                         meetings.rename(meeting, uid, Db.checked(data.get("userId"), 40, "成员"), Db.text(data.get("nickname")));
                         snapshot(id, meeting);
@@ -83,9 +93,10 @@ public class MeetingSocket extends TextWebSocketHandler {
                 }
             }
         } catch (ResponseStatusException error) {
-            send(socket, Map.of("type", "ERROR", "code", error.getStatusCode().value(), "message", Objects.toString(error.getReason(), "操作失败")));
+            send(socket, Map.of("type", errorType, "action", errorAction, "code", error.getStatusCode().value(),
+                "message", Objects.toString(error.getReason(), "操作失败")));
         } catch (Exception error) {
-            send(socket, Map.of("type", "ERROR", "code", "INVALID_MESSAGE", "message", "操作未完成，请重试"));
+            send(socket, Map.of("type", errorType, "action", errorAction, "code", "INVALID_MESSAGE", "message", "操作未完成，请重试"));
         }
     }
 
@@ -111,8 +122,14 @@ public class MeetingSocket extends TextWebSocketHandler {
                 .computeIfAbsent(uid, key -> new LinkedHashSet<>()).add(socket);
             String host = MeetingService.hostId(meeting);
             if (host.equals(uid)) cancelHandoff(id);
-            send(socket, Map.of("type", "JOINED", "meetingId", id, "hostUserId", host, "locked", MeetingService.isLocked(meeting)));
+            var presentation = presentations.get(id);
+            send(socket, Map.of("type", "JOINED", "meetingId", id, "hostUserId", host,
+                "locked", MeetingService.isLocked(meeting), "presentationTools", true, "hasPresentation", presentation != null));
             snapshot(id, meeting);
+            if (presentation != null) {
+                presentation.emptySince = 0;
+                send(socket, presentation.snapshot(uid, host.equals(uid), Db.now()));
+            }
         }
     }
 
@@ -140,6 +157,95 @@ public class MeetingSocket extends TextWebSocketHandler {
         }
     }
 
+    private void handlePresentation(String id, String uid, Map<String, Object> meeting, Map<?,?> data) {
+        limits.presentation(id, uid);
+        String action = Db.text(data.get("action"));
+        String segmentId = Db.text(data.get("segmentId"));
+        var presentation = presentations.get(id);
+        switch (action) {
+            case "SAVE", "INVITE", "SKIP", "FINISH", "ANSWER" -> meetings.requireHost(meeting, uid);
+        }
+        if ("SAVE".equals(action)) {
+            if (presentation != null && !presentation.editable()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "汇报已经开始");
+            }
+            presentations.put(id, new MeetingPresentation(readAgenda(id, data.get("agenda"))));
+        } else {
+            if (presentation == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "主持人尚未安排议程");
+            switch (action) {
+                case "READY" -> presentation.ready(uid, segmentId);
+                case "INVITE" -> presentation.invite(segmentId, candidate -> hasOnlineGrant(id, candidate, meeting));
+                case "SKIP" -> presentation.skip(segmentId, candidate -> hasOnlineGrant(id, candidate, meeting));
+                case "ACCEPT" -> presentation.accept(uid, segmentId, Db.now());
+                case "FINISH" -> presentation.finish();
+                case "PACE" -> presentation.pace(uid, segmentId, Db.text(data.get("value")));
+                case "QUESTION" -> presentation.ask(Db.checked(data.get("questionId"), 40, "问题编号"),
+                    segmentId, meetings.member(id, uid).get("nickname").toString(),
+                    Db.checked(data.get("content"), 300, "问题"), Db.now() - ((Number) meeting.get("created_at")).longValue());
+                case "ANSWER" -> presentation.answer(Db.checked(data.get("questionId"), 40, "问题编号"));
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的议程操作");
+            }
+        }
+        broadcastPresentation(id, meeting);
+    }
+
+    private List<MeetingPresentation.Segment> readAgenda(String id, Object value) {
+        if (!(value instanceof List<?> rows) || rows.isEmpty() || rows.size() > 10) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请填写 1 至 10 个环节");
+        }
+        var agenda = new ArrayList<MeetingPresentation.Segment>();
+        for (Object row : rows) {
+            if (!(row instanceof Map<?,?> item) || !(item.get("minutes") instanceof Integer minutes) || minutes < 1 || minutes > 30) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "每个环节限时 1 至 30 分钟");
+            }
+            String title = Db.checked(item.get("title"), 60, "环节名称");
+            String presenter = Db.checked(item.get("presenterId"), 40, "汇报人");
+            String name = meetings.member(id, presenter).get("nickname").toString();
+            agenda.add(new MeetingPresentation.Segment(Db.id(), title, presenter, name, minutes));
+        }
+        return agenda;
+    }
+
+    private void broadcastPresentation(String id, Map<String, Object> meeting) {
+        var presentation = presentations.get(id);
+        if (presentation == null) return;
+        String host = MeetingService.hostId(meeting);
+        long now = Db.now();
+        users(id).forEach((uid, sockets) -> {
+            var state = presentation.snapshot(uid, host.equals(uid), now);
+            for (var socket : sockets) {
+                if (hasGrant(socket, uid, meeting)) send(socket, state);
+            }
+        });
+    }
+
+    private void reassignInvitation(String id, Map<String, Object> meeting) {
+        var presentation = presentations.get(id);
+        if (presentation == null) return;
+        if (users(id).isEmpty()) presentation.emptySince = Db.now();
+        var invitation = presentation.invitation();
+        if (invitation != null && !hasOnlineGrant(id, invitation.presenterId(), meeting)) {
+            presentation.skip(invitation.id(), candidate -> hasOnlineGrant(id, candidate, meeting));
+            broadcastPresentation(id, meeting);
+        }
+    }
+
+    private void screenPoint(String id, String uid, Map<?,?> data) {
+        limits.screenPoint(id, uid);
+        String trackSid = Db.checked(data.get("trackSid"), 60, "共享画面");
+        if (!trackSid.matches("[A-Za-z0-9_-]+")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "共享画面无效");
+        broadcast(id, Map.of("type", "SCREEN_POINT", "trackSid", trackSid,
+            "x", screenCoordinate(data.get("x")), "y", screenCoordinate(data.get("y"))));
+    }
+
+    private double screenCoordinate(Object value) {
+        if (value instanceof Number number) {
+            double coordinate = number.doubleValue();
+            if (coordinate >= 0 && coordinate <= 1) return coordinate;
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请在共享画面内标记位置");
+    }
+
     private void handleHostAction(WebSocketSession socket, String id, String uid, Map<String,Object> meeting,
                                   String type, Map<?,?> data) {
         switch (type) {
@@ -159,6 +265,7 @@ public class MeetingSocket extends TextWebSocketHandler {
                 try { media.removeMember(id, target); } catch (Exception error) { mediaClosed = false; }
                 disconnectUser(id, target);
                 snapshot(id, meeting);
+                reassignInvitation(id, meeting);
                 send(socket, Map.of("type", "NOTICE", "message",
                     mediaClosed ? "已移出该成员" : "已移出成员，但音视频断开未确认，请检查媒体服务"));
             }
@@ -212,7 +319,9 @@ public class MeetingSocket extends TextWebSocketHandler {
         meetings.transferHost(id, target);
         cancelHandoff(id);
         broadcast(id, Map.of("type", "HOST_CHANGED", "hostUserId", target, "nickname", nickname));
-        snapshot(id, meetings.byId(id));
+        var meeting = meetings.byId(id);
+        snapshot(id, meeting);
+        broadcastPresentation(id, meeting);
     }
 
     private void leave(WebSocketSession socket) {
@@ -231,6 +340,7 @@ public class MeetingSocket extends TextWebSocketHandler {
             var meeting = openMeeting(id);
             if (meeting == null) return;
             snapshot(id, meeting);
+            reassignInvitation(id, meeting);
             if (uid.equals(MeetingService.hostId(meeting)) && !hasOnlineGrant(id, uid, meeting)) {
                 scheduleHandoff(id, uid);
             }
@@ -274,15 +384,16 @@ public class MeetingSocket extends TextWebSocketHandler {
     }
 
     private boolean hasOnlineGrant(String id, String uid, Map<String,Object> meeting) {
-        for (var socket : users(id).getOrDefault(uid, Set.of())) {
-            if (!socket.isOpen()) continue;
-            try {
-                if (uid.equals(authenticated(socket, meeting, (String) socket.getAttributes().get("authToken")))) return true;
-            } catch (ResponseStatusException ignored) {
-                // An open socket can outlive the account session or its meeting grant.
-            }
+        return users(id).getOrDefault(uid, Set.of()).stream().anyMatch(socket -> hasGrant(socket, uid, meeting));
+    }
+
+    private boolean hasGrant(WebSocketSession socket, String uid, Map<String, Object> meeting) {
+        if (!socket.isOpen()) return false;
+        try {
+            return uid.equals(authenticated(socket, meeting, (String) socket.getAttributes().get("authToken")));
+        } catch (ResponseStatusException ignored) {
+            return false; // An open socket can outlive the account session or its meeting grant.
         }
-        return false;
     }
 
     private void snapshot(String id, Map<String,Object> meeting) {
@@ -325,6 +436,7 @@ public class MeetingSocket extends TextWebSocketHandler {
     public void meetingEnded(String id) {
         synchronized (locks.meeting(id)) {
             cancelHandoff(id);
+            presentations.remove(id);
             var users = active.remove(id);
             if (users == null) return;
             for (var connections : users.values()) {
@@ -332,6 +444,19 @@ public class MeetingSocket extends TextWebSocketHandler {
                     socket.getAttributes().remove("meetingId");
                     send(socket, Map.of("type", "ENDED", "message", "会议已结束"));
                     try { socket.close(CloseStatus.NORMAL); } catch (Exception ignored) {}
+                }
+            }
+        }
+    }
+
+    @Scheduled(fixedDelay = 60_000)
+    void clearAbandonedPresentations() {
+        long cutoff = Db.now() - 30 * 60_000L;
+        for (String id : presentations.keySet()) {
+            synchronized (locks.meeting(id)) {
+                var presentation = presentations.get(id);
+                if (presentation != null && presentation.emptySince != 0 && presentation.emptySince <= cutoff) {
+                    presentations.remove(id);
                 }
             }
         }

@@ -2,12 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Room, RoomEvent, Track } from 'livekit-client'
-import { ArrowDown, ArrowLeft, ArrowRight, Check, ChevronUp, Copy, Keyboard, LockKeyhole, LockKeyholeOpen, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRight, Check, ChevronUp, Clock3, Copy, Keyboard, ListOrdered, LockKeyhole, LockKeyholeOpen, LogOut, MessageSquare, Mic, MicOff, MonitorUp, MoreHorizontal, Send, Settings2, Users, Video, VideoOff } from 'lucide-vue-next'
 import { api } from '../api'
 import { createMeetingSocket } from '../meetingSocket'
 import { useUser } from '../stores/user'
 import MeetingMedia from '../components/MeetingMedia.vue'
 import MeetingSidePanel from '../components/MeetingSidePanel.vue'
+import MeetingPresentationPanel from '../components/MeetingPresentationPanel.vue'
 import LogoMark from '../components/LogoMark.vue'
 import { groupNumber } from '../format'
 import { mediaError as explainMediaError, requestError } from '../mediaErrors'
@@ -20,6 +21,7 @@ import { useMeetingDevices } from '../useMeetingDevices'
 import { adjustVideoQuality } from '../networkQuality'
 import { avatarStyle } from '../avatarColors'
 import { groupChat } from '../chatText'
+import { formatPresentationTime, unansweredSummary } from '../meetingPresentation'
 
 const route=useRoute(),router=useRouter(),user=useUser(),number=route.params.number
 const joinDevices=useJoinDevices(),initialSelection=joinDevices.consume(number),deviceDefaults=initialSelection || loadDevicePreferences()
@@ -36,10 +38,18 @@ const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 const unread=ref(0),waitingMessages=ref(0),narrowScreen=ref(false)
+const presentationTools=ref(false),presentation=ref(null),points=ref([]),pendingShare=shallowRef(null)
+const presentationNow=ref(0)
+const currentSegment=computed(()=>presentation.value?.agenda.find(segment=>segment.id===presentation.value.currentId))
+const ownInvitation=computed(()=>presentation.value?.agenda.find(segment=>segment.id===presentation.value.invitedId && segment.presenterId===user.current?.id))
+const overtime=computed(()=>!!currentSegment.value && presentationNow.value>=presentation.value.deadline)
+const remaining=computed(()=>currentSegment.value ? (overtime.value ? '+' : '')+formatPresentationTime(Math.abs(presentation.value.deadline-presentationNow.value)) : '')
 const drawerOpen = computed(() => narrowScreen.value && sideOpen.value)
 const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || drawerOpen.value))
 let chatPosition = { top:0, following:true }
 let widthQuery
+let panelOpener, presentationTimer, pointTimer, pointId=0
+let clockSample={now:0, received:0}
 let toolbarTouch = null, toolbarSwiped = false
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
 let membersInitialized=false
@@ -108,8 +118,13 @@ async function selectDevice(kind, id) {
   const openMenu = deviceMenu.value
   if (await mediaDevices.choose(kind, id) && deviceMenu.value === openMenu) closePopovers(true)
 }
-function openPanel(value){panel.value=value;sideOpen.value=narrowScreen.value;closePopovers()}
-function closePanel(){sideOpen.value=false;closePopovers();nextTick(()=>moreButton.value?.focus({preventScroll:true}))}
+function openPanel(value,event){panelOpener=event?.currentTarget;panel.value=value;sideOpen.value=narrowScreen.value;closePopovers()}
+function closePanel(){
+  sideOpen.value=false;closePopovers()
+  const trigger=panelOpener?.isConnected ? panelOpener : moreButton.value
+  panelOpener=null
+  nextTick(()=>trigger?.focus({preventScroll:true}))
+}
 function startToolbarSwipe(event) {
   toolbarSwiped = false
   toolbarTouch = event.pointerType === 'touch' && narrowScreen.value ? { id: event.pointerId, y: event.clientY } : null
@@ -192,7 +207,42 @@ async function history() {
     if (following) nextTick(scrollChatBottom)
   } catch (error) { flash(requestError(error)) }
 }
+function updatePresentationTime() {
+  presentationNow.value=clockSample.now+performance.now()-clockSample.received
+}
+watch(()=>presentation.value?.deadline, deadline=>{
+  clearInterval(presentationTimer)
+  if(deadline) presentationTimer=setInterval(updatePresentationTime,200)
+})
+function receivePresentation(event) {
+  const previous=ownInvitation.value?.id
+  clockSample={now:event.serverNow, received:performance.now()}
+  updatePresentationTime()
+  presentation.value=event
+  const accepted=pendingShare.value?.segmentId
+  if(accepted && event.currentId===accepted) pendingShare.value=null
+  else if(accepted && event.invitedId!==accepted) stopPendingShare()
+  if(ownInvitation.value && ownInvitation.value.id!==previous) flash('轮到你汇报了，打开「汇报」接手。')
+}
+function trimPoints() {
+  clearTimeout(pointTimer)
+  const now=performance.now()
+  points.value=points.value.filter(point=>point.expiresAt>now)
+  if(points.value.length) pointTimer=setTimeout(trimPoints,Math.max(1,points.value[0].expiresAt-now))
+}
+function receivePoint(event) {
+  points.value=[...points.value.slice(-5),{...event,id:++pointId,expiresAt:performance.now()+2400}]
+  trimPoints()
+}
 function handleEvent(event){
+  if(event.type==='JOINED') {
+    presentationTools.value=event.presentationTools===true
+    if(!presentationTools.value || event.hasPresentation===false) {
+      presentation.value=null
+      stopPendingShare()
+      if(!presentationTools.value && panel.value==='presentation')panel.value='members'
+    }
+  }
   if (event.type === 'JOINED' && typeof event.hostUserId === 'string') {
     meeting.value.hostUserId = event.hostUserId
     meeting.value.locked = event.locked
@@ -220,6 +270,12 @@ function handleEvent(event){
   if(event.type==='CHAT' || event.type==='CHAT_ACK'){addMessage(event,event.type==='CHAT');clearPendingTimer(event.client_id);pending.value=pending.value.filter(item=>item.client_id!==event.client_id)}
   if(event.type==='MUTED'){hostMuteRevision++;microphone.value=false;if(initialMedia)initialMedia.microphoneOn=false;if(restoreMedia)restoreMedia.microphoneOn=false;flash(event.message);muteFeedback.value=false;nextTick(()=>muteFeedback.value=true)}
   if(event.type==='NOTICE')flash(event.message)
+  if(event.type==='PRESENTATION_STATE')receivePresentation(event)
+  if(event.type==='SCREEN_POINT')receivePoint(event)
+  if(event.type==='PRESENTATION_ERROR'){
+    if(event.action==='ACCEPT')stopPendingShare()
+    flash(event.message)
+  }
   if(event.type==='ERROR'){
     if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed){failed.failed=true;clearPendingTimer(failed.client_id)}}
     flash(event.message);if(connection.value==='expired'){leaving=true;mediaGeneration++;fatal.value=event.message;room.value?.disconnect();room.value=null}
@@ -228,7 +284,10 @@ function handleEvent(event){
   if(event.type==='ENDED' && !leaving){leaving=true;mediaGeneration++;socket?.close();room.value?.disconnect();room.value=null;showEnded(true)}
 }
 function showEnded(meetingEnded=false){
-  router.push({path:`/ended/${number}`,state:{meetingTitle:meeting.value?.title || '',elapsedSeconds:Math.max(0,Math.floor((Date.now()-enteredAt)/1000)),meetingEnded}})
+  const unanswered=meetingEnded && isHost.value ? unansweredSummary(presentation.value) : ''
+  router.push({path:`/ended/${number}`,state:{
+    meetingTitle:meeting.value?.title || '',elapsedSeconds:Math.max(0,Math.floor((Date.now()-enteredAt)/1000)),meetingEnded,unanswered,
+  }})
 }
 function connectSocket(){
   socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
@@ -299,8 +358,9 @@ async function load(){
   }catch(e){if(e.status===401||e.status===403)router.replace(`/join/${number}`);else fatal.value=requestError(e)}
   finally{loading.value=false}
 }
-async function device(kind){
-  if(!room.value || mediaState.value!=='connected'){flash('请先连接音视频');return}
+async function device(kind,screenEnabled){
+  if(deviceBusy.value)return false
+  if(!room.value || mediaState.value!=='connected'){flash('请先连接音视频');return false}
   const target=room.value,generation=mediaGeneration
   const stale=()=>generation!==mediaGeneration || leaving || room.value!==target
   deviceBusy.value=true
@@ -317,12 +377,45 @@ async function device(kind){
       if(!stale())camera.value=target.localParticipant.isCameraEnabled
     }
     if(kind==='screen'){
-      const enabled=!sharing.value;await target.localParticipant.setScreenShareEnabled(enabled,{audio:false})
+      const enabled=screenEnabled ?? !sharing.value
+      await target.localParticipant.setScreenShareEnabled(enabled,{audio:false})
       if(enabled && stale())await target.localParticipant.setScreenShareEnabled(false)
       if(!stale())sharing.value=target.localParticipant.isScreenShareEnabled
+      return !stale() && sharing.value===enabled
     }
   }catch(e){if(!stale()){const message=explainMediaError(e,{operation:kind});if(message)flash(message)}}
   finally{deviceBusy.value=false}
+}
+function sendPresentation(action) {
+  if(socket?.send({type:'PRESENTATION',...action}))return true
+  flash('连接已断开，请稍后重试')
+  return false
+}
+async function stopPendingShare() {
+  const pending=pendingShare.value
+  pendingShare.value=null
+  if(!pending || pending.room!==room.value || leaving)return
+  try {
+    await pending.room.localParticipant.setScreenShareEnabled(false)
+    if(pending.room===room.value)sharing.value=pending.room.localParticipant.isScreenShareEnabled
+  } catch { flash('未能停止共享，请手动停止共享。') }
+}
+async function acceptPresentation(segmentId,withScreen) {
+  if(ownInvitation.value?.id!==segmentId || connection.value!=='connected' || pendingShare.value || deviceBusy.value)return
+  if(withScreen && !sharing.value) {
+    const target=room.value
+    if(!await device('screen',true))return
+    pendingShare.value={segmentId,room:target}
+    if(ownInvitation.value?.id!==segmentId || connection.value!=='connected' || leaving){
+      await stopPendingShare()
+      if(!leaving)flash('接力邀请已变更，请查看议程。')
+      return
+    }
+  }
+  if(!sendPresentation({action:'ACCEPT',segmentId}))await stopPendingShare()
+}
+function sendPoint(point) {
+  if(!socket?.send({type:'SCREEN_POINT',...point}))flash('连接已断开，请稍后重试')
 }
 function sendChat(){
   const content=draft.value.trim();if(!content || connection.value!=='connected')return
@@ -392,7 +485,7 @@ function onShortcut(event){
   const key=event.key.toLowerCase()
   if(key==='?'){event.preventDefault();shortcutsDialog.value=true;return}
   if(key==='c'){event.preventDefault();openPanel('chat');return}
-  if(deviceBusy.value || mediaDevices.switching.value)return
+  if(deviceBusy.value || pendingShare.value || mediaDevices.switching.value)return
   const kind=({m:'mic',v:'camera',s:'screen'})[key]
   if(kind && (kind!=='screen' || screenShareSupported)){event.preventDefault();device(kind)}
 }
@@ -409,6 +502,8 @@ onBeforeUnmount(() => {
   leaving = true
   mediaGeneration++
   clearTimeout(noticeTimer)
+  clearInterval(presentationTimer)
+  clearTimeout(pointTimer)
   widthQuery?.removeEventListener?.('change', updateWidth)
   document.removeEventListener('keydown', onShortcut)
   document.removeEventListener('pointerdown', onOutsidePointer)
@@ -453,7 +548,16 @@ onBeforeUnmount(() => {
       </div>
       <div class="conference-layout" :class="{ entering }" @animationend.self="entering=false">
         <section class="conference-main" :inert="drawerOpen">
-          <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number" @invite="copy(inviteText,'邀请信息已复制')"/>
+          <button v-if="ownInvitation || currentSegment" class="presentation-brief" :class="{ invited: ownInvitation, overtime }"
+            @click="openPanel('presentation',$event)">
+            <ListOrdered :size="16" />
+            <strong>{{ ownInvitation ? '轮到你汇报了' : currentSegment.title }}</strong>
+            <span v-if="ownInvitation">查看邀请 <ArrowRight :size="14" /></span>
+            <span v-else><Clock3 :size="14" /> {{ remaining }}</span>
+          </button>
+          <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number"
+            :presenter-id="currentSegment?.presenterId" :can-point="presentationTools && connection==='connected' && mediaState==='connected'" :points="points"
+            @invite="copy(inviteText,'邀请信息已复制')" @point="sendPoint"/>
           <div class="conference-toolbar" @pointerdown="startToolbarSwipe" @pointerup="finishToolbarSwipe"
             @pointercancel="toolbarTouch=null" @click.capture="preventSwipeClick">
             <div class="toolbar-controls">
@@ -463,7 +567,7 @@ onBeforeUnmount(() => {
               <div class="device-control-wrap" data-room-popover><button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><span class="control-symbol"><Transition name="control-icon"><Video v-if="camera" key="on" :size="20"/><VideoOff v-else key="off" :size="20"/></Transition></span><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button><button class="device-arrow" aria-label="选择摄像头" :aria-expanded="deviceMenu==='videoinput'" @click="openDeviceMenu('videoinput',$event)"><ChevronUp :size="14"/></button>
                 <div v-if="deviceMenu==='videoinput'" class="device-popover"><strong>摄像头</strong><button :class="{chosen:!mediaDevices.selected.cameraId}" @click="selectDevice('videoinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='videoinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.cameraId===item.deviceId}" @click="selectDevice('videoinput',item.deviceId)">{{ item.label || `摄像头 ${index+1}` }}</button></div>
               </div>
-              <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
+              <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy || !!pendingShare" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <span v-else class="screen-unavailable">当前浏览器不支持屏幕共享</span>
               <button class="meeting-control desktop-obs-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
               <div class="mobile-more-wrap" data-room-popover>
@@ -471,6 +575,7 @@ onBeforeUnmount(() => {
                 <div v-if="moreOpen" class="mobile-more-menu">
                   <button @click="openPanel('members')"><Users :size="16"/> 成员（{{ members.length }}）</button>
                   <button @click="openPanel('chat')"><MessageSquare :size="16"/> 聊天 <span v-if="unread">（{{ unread }}）</span></button>
+                  <button v-if="presentationTools" @click="openPanel('presentation')"><ListOrdered :size="16"/> 汇报<i v-if="ownInvitation" class="presentation-invite-dot"></i></button>
                   <button @click="closePopovers(true);obsDialog=true"><Settings2 :size="16"/> OBS 推流</button>
                   <button @click="closePopovers(true);shortcutsDialog=true"><Keyboard :size="16"/> 快捷键</button>
                   <p v-if="!screenShareSupported">当前浏览器不支持屏幕共享</p>
@@ -481,7 +586,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
         <MeetingSidePanel v-model:tab="panel" :compact="narrowScreen" :drawer-open="drawerOpen"
-          :member-count="members.length" :unread="unread" @close="closePanel">
+          :member-count="members.length" :unread="unread" :presentation-tools="presentationTools" :invited="!!ownInvitation" @close="closePanel">
           <template #members>
             <div class="side-caption">{{ connection==='connected' ? `${members.length} 人在会` : connectionText }}</div>
             <div v-if="isHost && supportsHostControls" class="host-controls" aria-label="主持人操作" role="group">
@@ -519,6 +624,12 @@ onBeforeUnmount(() => {
             </button></Transition></div>
             <div v-if="draft.length>=900" class="chat-counter" aria-live="polite">还可输入 {{ 1000-draft.length }} 字</div>
             <form class="conference-chat-form" @submit.prevent="sendChat"><input v-model="draft" maxlength="1000" :disabled="connection!=='connected'" aria-label="会议消息" placeholder="输入消息…"/><button :disabled="!draft.trim() || connection!=='connected'" aria-label="发送消息"><Send :size="18"/></button></form>
+          </template>
+          <template #presentation>
+            <MeetingPresentationPanel :state="presentation" :members="members" :user-id="user.current.id" :host="isHost"
+              :connected="connection==='connected'" :can-share="screenShareSupported && mediaState==='connected'"
+              :busy="deviceBusy || !!pendingShare" :remaining="remaining" :overtime="overtime"
+              @action="sendPresentation" @takeover="acceptPresentation" @copy="value=>copy(value,'未回答问题已复制')" />
           </template>
         </MeetingSidePanel>
       </div>

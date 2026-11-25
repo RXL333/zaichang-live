@@ -96,6 +96,102 @@ class MeetingIntegrationTest {
         }
     }
 
+    @Test void presentationRestoresTheTimerAndSkipsAnUnavailablePresenter() throws Exception {
+        User owner = register(), speaker = register(), attendee = register();
+        String number = createMeeting(owner, ""), otherNumber = createMeeting(attendee, "");
+        for (User user : List.of(owner, speaker, attendee)) assertEquals(200, join(user, number, "").statusCode());
+        assertEquals(200, join(attendee, otherNumber, "").statusCode());
+        Socket host = socket(owner, number), next = socket(speaker, number), audience = socket(attendee, number);
+        Socket other = socket(attendee, otherNumber);
+        try {
+            var save = Map.of("type", "PRESENTATION", "action", "SAVE", "agenda", List.of(
+                Map.of("title", "背景", "presenterId", owner.id(), "minutes", 2),
+                Map.of("title", "方案", "presenterId", speaker.id(), "minutes", 3),
+                Map.of("title", "总结", "presenterId", attendee.id(), "minutes", 1)));
+            send(next, save);
+            assertEquals(403, receive(next, "PRESENTATION_ERROR").get("code"));
+            send(host, save);
+            var draft = receive(host, "PRESENTATION_STATE");
+            var agenda = (List<?>) draft.get("agenda");
+            var first = ((Map<?, ?>) agenda.get(0)).get("id");
+            var second = ((Map<?, ?>) agenda.get(1)).get("id");
+            var third = ((Map<?, ?>) agenda.get(2)).get("id");
+            receive(next, "PRESENTATION_STATE");
+            receive(audience, "PRESENTATION_STATE");
+            assertFalse(waitFor(other.events(), "PRESENTATION_STATE", 200));
+
+            send(host, Map.of("type", "PRESENTATION", "action", "INVITE", "segmentId", first));
+            assertEquals(first, receive(host, "PRESENTATION_STATE").get("invitedId"));
+            receive(next, "PRESENTATION_STATE");
+            receive(audience, "PRESENTATION_STATE");
+            var accept = Map.of("type", "PRESENTATION", "action", "ACCEPT", "segmentId", first);
+            send(next, accept);
+            assertEquals(403, receive(next, "PRESENTATION_ERROR").get("code"));
+            send(host, accept);
+            var active = receive(host, "PRESENTATION_STATE");
+            assertEquals(first, active.get("currentId"));
+            long deadline = ((Number) active.get("deadline")).longValue();
+            assertEquals(120_000L, deadline - ((Number) active.get("startedAt")).longValue());
+            receive(next, "PRESENTATION_STATE");
+            receive(audience, "PRESENTATION_STATE");
+
+            send(next, Map.of("type", "PRESENTATION", "action", "READY", "segmentId", second));
+            assertEquals(List.of(second), receive(host, "PRESENTATION_STATE").get("readyIds"));
+            receive(next, "PRESENTATION_STATE");
+            receive(audience, "PRESENTATION_STATE");
+            send(next, Map.of("type", "PRESENTATION", "action", "PACE", "segmentId", first, "value", "slower"));
+            assertEquals(1, ((Map<?, ?>) receive(host, "PRESENTATION_STATE").get("paceCounts")).get("slower"));
+            assertEquals("slower", receive(next, "PRESENTATION_STATE").get("ownPace"));
+            assertFalse(receive(audience, "PRESENTATION_STATE").containsKey("paceCounts"));
+
+            var question = Map.of("type", "PRESENTATION", "action", "QUESTION", "segmentId", first,
+                "questionId", "question-1", "content", "何时提交？");
+            for (int attempt = 0; attempt < 2; attempt++) {
+                send(next, question);
+                var questions = (List<?>) receive(host, "PRESENTATION_STATE").get("questions");
+                assertEquals(1, questions.size());
+                assertEquals(first, ((Map<?, ?>) questions.get(0)).get("segmentId"));
+                receive(next, "PRESENTATION_STATE");
+                receive(audience, "PRESENTATION_STATE");
+            }
+            var answer = Map.of("type", "PRESENTATION", "action", "ANSWER", "questionId", "question-1");
+            send(next, answer);
+            assertEquals(403, receive(next, "PRESENTATION_ERROR").get("code"));
+            send(host, answer);
+            var answers = (List<?>) receive(host, "PRESENTATION_STATE").get("questions");
+            assertEquals(true, ((Map<?, ?>) answers.get(0)).get("answered"));
+            receive(next, "PRESENTATION_STATE");
+            receive(audience, "PRESENTATION_STATE");
+
+            send(audience, Map.of("type", "SCREEN_POINT", "trackSid", "TR_screen", "x", 1.1, "y", .7));
+            assertEquals(400, receive(audience, "PRESENTATION_ERROR").get("code"));
+            send(audience, Map.of("type", "SCREEN_POINT", "trackSid", "TR_screen", "x", .2, "y", .7));
+            assertEquals(.2, receive(host, "SCREEN_POINT").get("x"));
+            assertEquals("TR_screen", receive(next, "SCREEN_POINT").get("trackSid"));
+            assertFalse(waitFor(other.events(), "SCREEN_POINT", 200));
+
+            send(host, Map.of("type", "PRESENTATION", "action", "INVITE", "segmentId", second));
+            assertEquals(second, receive(host, "PRESENTATION_STATE").get("invitedId"));
+            receive(audience, "PRESENTATION_STATE");
+            close(next);
+            var reassigned = receive(host, "PRESENTATION_STATE");
+            assertEquals(third, reassigned.get("invitedId"));
+            assertEquals(List.of(second), reassigned.get("skippedIds"));
+            assertEquals(deadline, ((Number) reassigned.get("deadline")).longValue());
+            receive(audience, "PRESENTATION_STATE");
+            var rejoined = socket(speaker, number);
+            try {
+                var restored = receive(rejoined, "PRESENTATION_STATE");
+                assertEquals(deadline, ((Number) restored.get("deadline")).longValue());
+                assertEquals(answers, restored.get("questions"));
+                send(audience, Map.of("type", "PRESENTATION", "action", "ACCEPT", "segmentId", third));
+                var finalSegment = receive(audience, "PRESENTATION_STATE");
+                assertEquals(third, finalSegment.get("currentId"));
+                assertEquals(0, ((Map<?, ?>) finalSegment.get("paceCounts")).get("slower"));
+            } finally { close(rejoined); }
+        } finally { close(host, next, audience, other); }
+    }
+
     @Test void onlyCurrentHostControlsTheRoomAndTransferKeepsOwnership() throws Exception {
         User owner = register(), member = register(), outsider = register();
         String number = createMeeting(owner, ""), otherNumber = createMeeting(outsider, "");
