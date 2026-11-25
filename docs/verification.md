@@ -2,6 +2,13 @@
 
 下面按日期记录实际执行的检查。旧版本的结果可从 Git 历史查看。
 
+## 会中交互打磨，2026-11-25
+
+- `live-web` 的 `npm test` 共 91 项通过。消息测试核对了重发及收到确认后复用同一条消息节点。用 GitHub Pages 的子路径和 hash 路由配置执行 `npm run build` 成功。
+- `npm run test:e2e -- --workers=1 --reporter=line` 的 13 个场景通过。覆盖手机宽度下的抽屉拖动、回弹、关闭、方向键切换和焦点恢复，以及聊天切换时保留阅读位置、定位新消息、点外侧关闭菜单和弹窗焦点。
+- 两项会中浏览器场景复测通过。Chromium 模拟触控从工具栏向上滑可以打开抽屉，麦克风保持关闭。模拟重连提示与会中通知出现前后，视频区的尺寸和位置一致。
+- `live-server` 运行 `mvn '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp' -B test`，21 项全部通过。浏览器场景使用模拟业务与媒体连接，真机触感和真实网络下的动效仍待实测。
+
 ## 第四阶段分享、外观与入会动效，2026-11-25
 
 - `live-web` 运行 `npm ci --registry=https://registry.npmjs.org` 成功，`npm test` 共 91 项通过。用 Pages 的 `/zaichang-live/` 基础路径和 hash 路由配置运行 `npm run build` 成功。LiveKit 独立分块仍约 575 KB。
