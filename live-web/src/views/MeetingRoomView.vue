@@ -38,7 +38,8 @@ const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
 const unread=ref(0),waitingMessages=ref(0),narrowScreen=ref(false)
-const presentationTools=ref(false),presentation=ref(null),points=ref([]),pendingShare=shallowRef(null)
+const presentationTools=ref(false),presentation=ref(null),points=ref([])
+const handoff=shallowRef(null),handoffNote=ref(''),presentationBrief=ref(null)
 const presentationNow=ref(0)
 const currentSegment=computed(()=>presentation.value?.agenda.find(segment=>segment.id===presentation.value.currentId))
 const ownInvitation=computed(()=>presentation.value?.agenda.find(segment=>segment.id===presentation.value.invitedId && segment.presenterId===user.current?.id))
@@ -48,7 +49,7 @@ const drawerOpen = computed(() => narrowScreen.value && sideOpen.value)
 const chatVisible=computed(()=>panel.value==='chat' && (!narrowScreen.value || drawerOpen.value))
 let chatPosition = { top:0, following:true }
 let widthQuery
-let panelOpener, presentationTimer, pointTimer, pointId=0
+let panelOpener, presentationTimer, handoffTimer, pointTimer, pointId=0
 let clockSample={now:0, received:0}
 let toolbarTouch = null, toolbarSwiped = false
 let socket,leaving=false,mediaGeneration=0,noticeTimer,initialMedia=initialSelection,restoreMedia=null,hostMuteRevision=0
@@ -121,9 +122,14 @@ async function selectDevice(kind, id) {
 function openPanel(value,event){panelOpener=event?.currentTarget;panel.value=value;sideOpen.value=narrowScreen.value;closePopovers()}
 function closePanel(){
   sideOpen.value=false;closePopovers()
-  const trigger=panelOpener?.isConnected ? panelOpener : moreButton.value
+  const opener=panelOpener
+  const presentationWasOpen=panel.value==='presentation'
   panelOpener=null
-  nextTick(()=>trigger?.focus({preventScroll:true}))
+  nextTick(()=>{
+    if(drawerOpen.value)return
+    const trigger=opener?.isConnected ? opener : (presentationWasOpen && presentationBrief.value) || moreButton.value
+    trigger?.focus({preventScroll:true})
+  })
 }
 function startToolbarSwipe(event) {
   toolbarSwiped = false
@@ -219,19 +225,37 @@ function receivePresentation(event) {
   clockSample={now:event.serverNow, received:performance.now()}
   updatePresentationTime()
   presentation.value=event
-  const accepted=pendingShare.value?.segmentId
-  if(accepted && event.currentId===accepted) pendingShare.value=null
-  else if(accepted && event.invitedId!==accepted) stopPendingShare()
-  if(ownInvitation.value && ownInvitation.value.id!==previous) flash('轮到你汇报了，打开「汇报」接手。')
+  const invited=ownInvitation.value?.id
+  if(invited!==previous)handoffNote.value=''
+  if(handoff.value?.phase==='confirming'){
+    if(event.currentId===handoff.value.segmentId){
+      clearHandoff()
+      if(drawerOpen.value && panel.value==='presentation')closePanel()
+      announce(`已接手「${currentSegment.value.title}」`)
+      return
+    }
+    if(event.invitedId!==handoff.value.segmentId)cancelHandoff()
+  }
+  if(invited && invited!==previous)announce(`轮到你汇报「${ownInvitation.value.title}」`)
 }
 function trimPoints() {
   clearTimeout(pointTimer)
   const now=performance.now()
   points.value=points.value.filter(point=>point.expiresAt>now)
-  if(points.value.length) pointTimer=setTimeout(trimPoints,Math.max(1,points.value[0].expiresAt-now))
+  if(points.value.length) {
+    const nextExpiry=Math.min(...points.value.map(point=>point.expiresAt))
+    pointTimer=setTimeout(trimPoints,Math.max(1,nextExpiry-now))
+  }
+}
+function addPoint(point,pending=false) {
+  points.value=[...points.value.slice(-5),{...point,pending,id:++pointId,expiresAt:performance.now()+(pending ? 700 : 2400)}]
+  trimPoints()
 }
 function receivePoint(event) {
-  points.value=[...points.value.slice(-5),{...event,id:++pointId,expiresAt:performance.now()+2400}]
+  const preview=points.value.find(point=>point.pending && point.trackSid===event.trackSid && point.x===event.x && point.y===event.y)
+  if(!preview){addPoint(event);return}
+  preview.pending=false
+  preview.expiresAt=performance.now()+2400
   trimPoints()
 }
 function handleEvent(event){
@@ -239,7 +263,7 @@ function handleEvent(event){
     presentationTools.value=event.presentationTools===true
     if(!presentationTools.value || event.hasPresentation===false) {
       presentation.value=null
-      stopPendingShare()
+      if(handoff.value?.phase==='confirming')cancelHandoff()
       if(!presentationTools.value && panel.value==='presentation')panel.value='members'
     }
   }
@@ -273,8 +297,8 @@ function handleEvent(event){
   if(event.type==='PRESENTATION_STATE')receivePresentation(event)
   if(event.type==='SCREEN_POINT')receivePoint(event)
   if(event.type==='PRESENTATION_ERROR'){
-    if(event.action==='ACCEPT')stopPendingShare()
-    flash(event.message)
+    if(event.action==='ACCEPT' && handoff.value?.phase==='confirming')cancelHandoff(event.message)
+    else flash(event.message)
   }
   if(event.type==='ERROR'){
     if(event.code===429){const failed=pending.value.find(item=>!item.failed);if(failed){failed.failed=true;clearPendingTimer(failed.client_id)}}
@@ -290,7 +314,10 @@ function showEnded(meetingEnded=false){
   }})
 }
 function connectSocket(){
-  socket=createMeetingSocket({number,onState:value=>connection.value=value,onEvent:handleEvent,onJoined:async()=>{
+  socket=createMeetingSocket({number,onState:value=>{
+    connection.value=value
+    if(value!=='connected' && handoff.value?.phase==='confirming')cancelHandoff('连接中断，恢复后可重新接手。')
+  },onEvent:handleEvent,onJoined:async()=>{
     await history();for(const item of pending.value.filter(item=>!item.failed))sendPending(item)
   }})
 }
@@ -391,31 +418,50 @@ function sendPresentation(action) {
   flash('连接已断开，请稍后重试')
   return false
 }
-async function stopPendingShare() {
-  const pending=pendingShare.value
-  pendingShare.value=null
-  if(!pending || pending.room!==room.value || leaving)return
-  try {
-    await pending.room.localParticipant.setScreenShareEnabled(false)
-    if(pending.room===room.value)sharing.value=pending.room.localParticipant.isScreenShareEnabled
-  } catch { flash('未能停止共享，请手动停止共享。') }
+function clearHandoff() {
+  clearTimeout(handoffTimer)
+  handoff.value=null
+}
+async function cancelHandoff(message='') {
+  const attempt=handoff.value
+  clearHandoff()
+  if(!attempt || leaving)return
+  if(ownInvitation.value?.id===attempt.segmentId)handoffNote.value=message
+  if(attempt.trackSid && attempt.room===room.value &&
+    attempt.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.trackSid===attempt.trackSid){
+    try{
+      await attempt.room.localParticipant.setScreenShareEnabled(false)
+      if(room.value===attempt.room)sharing.value=attempt.room.localParticipant.isScreenShareEnabled
+    }catch{flash('共享仍在进行，请手动停止共享。')}
+  }
 }
 async function acceptPresentation(segmentId,withScreen) {
-  if(ownInvitation.value?.id!==segmentId || connection.value!=='connected' || pendingShare.value || deviceBusy.value)return
+  const offer=ownInvitation.value
+  if(offer?.id!==segmentId || connection.value!=='connected' || handoff.value || deviceBusy.value)return
+  handoffNote.value=''
+  const attempt={segmentId,room:room.value,phase:'selecting'}
+  handoff.value=attempt
   if(withScreen && !sharing.value) {
-    const target=room.value
-    if(!await device('screen',true))return
-    pendingShare.value={segmentId,room:target}
-    if(ownInvitation.value?.id!==segmentId || connection.value!=='connected' || leaving){
-      await stopPendingShare()
-      if(!leaving)flash('接力邀请已变更，请查看议程。')
+    if(!await device('screen',true)){
+      cancelHandoff('共享未开启。可以重试，或直接开始汇报。')
       return
     }
+    attempt.trackSid=attempt.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.trackSid
   }
-  if(!sendPresentation({action:'ACCEPT',segmentId}))await stopPendingShare()
+  if(leaving || ownInvitation.value?.id!==segmentId || connection.value!=='connected'){
+    cancelHandoff('邀请已变更，请查看议程。')
+    return
+  }
+  handoff.value={...attempt,phase:'confirming'}
+  if(!socket?.send({type:'PRESENTATION',action:'ACCEPT',segmentId})){
+    cancelHandoff('连接中断，恢复后可重新接手。')
+    return
+  }
+  handoffTimer=setTimeout(()=>cancelHandoff('接手确认超时，请重试。'),8000)
 }
 function sendPoint(point) {
-  if(!socket?.send({type:'SCREEN_POINT',...point}))flash('连接已断开，请稍后重试')
+  if(socket?.send({type:'SCREEN_POINT',...point}))addPoint(point,true)
+  else flash('连接已断开，请稍后重试')
 }
 function sendChat(){
   const content=draft.value.trim();if(!content || connection.value!=='connected')return
@@ -485,8 +531,9 @@ function onShortcut(event){
   const key=event.key.toLowerCase()
   if(key==='?'){event.preventDefault();shortcutsDialog.value=true;return}
   if(key==='c'){event.preventDefault();openPanel('chat');return}
-  if(deviceBusy.value || pendingShare.value || mediaDevices.switching.value)return
+  if(deviceBusy.value || mediaDevices.switching.value)return
   const kind=({m:'mic',v:'camera',s:'screen'})[key]
+  if(kind==='screen' && handoff.value && !sharing.value)return
   if(kind && (kind!=='screen' || screenShareSupported)){event.preventDefault();device(kind)}
 }
 function updateWidth(){narrowScreen.value=!!widthQuery?.matches;if(!narrowScreen.value)sideOpen.value=false}
@@ -503,6 +550,7 @@ onBeforeUnmount(() => {
   mediaGeneration++
   clearTimeout(noticeTimer)
   clearInterval(presentationTimer)
+  clearHandoff()
   clearTimeout(pointTimer)
   widthQuery?.removeEventListener?.('change', updateWidth)
   document.removeEventListener('keydown', onShortcut)
@@ -548,16 +596,21 @@ onBeforeUnmount(() => {
       </div>
       <div class="conference-layout" :class="{ entering }" @animationend.self="entering=false">
         <section class="conference-main" :inert="drawerOpen">
-          <button v-if="ownInvitation || currentSegment" class="presentation-brief" :class="{ invited: ownInvitation, overtime }"
-            @click="openPanel('presentation',$event)">
-            <ListOrdered :size="16" />
-            <strong>{{ ownInvitation ? '轮到你汇报了' : currentSegment.title }}</strong>
-            <span v-if="ownInvitation">查看邀请 <ArrowRight :size="14" /></span>
-            <span v-else><Clock3 :size="14" /> {{ remaining }}</span>
-          </button>
           <MeetingMedia :room="room" :members="members" :user-id="user.current.id" :media-state="mediaState" :meeting-number="number"
-            :presenter-id="currentSegment?.presenterId" :can-point="presentationTools && connection==='connected' && mediaState==='connected'" :points="points"
-            @invite="copy(inviteText,'邀请信息已复制')" @point="sendPoint"/>
+            :presenter-id="currentSegment?.presenterId" :can-point="presentationTools && connection==='connected' && mediaState==='connected' && !drawerOpen"
+            :points="points"
+            @invite="copy(inviteText,'邀请信息已复制')" @point="sendPoint">
+            <template #stage-action>
+              <button v-if="ownInvitation || currentSegment || (narrowScreen && presentationTools)" ref="presentationBrief" class="presentation-brief"
+                :class="{ invited: ownInvitation, overtime }" aria-controls="meeting-side"
+                :aria-expanded="narrowScreen ? drawerOpen && panel==='presentation' : undefined" @click="openPanel('presentation',$event)">
+                <ListOrdered :size="16" aria-hidden="true" />
+                <strong :key="ownInvitation?.id || currentSegment?.id">{{ ownInvitation?.title || currentSegment?.title || '汇报' }}</strong>
+                <span v-if="ownInvitation" class="presentation-brief-action">接手汇报 <ArrowRight :size="14" aria-hidden="true" /></span>
+                <span v-else-if="currentSegment"><Clock3 :size="14" aria-hidden="true" /> {{ remaining }}</span>
+              </button>
+            </template>
+          </MeetingMedia>
           <div class="conference-toolbar" @pointerdown="startToolbarSwipe" @pointerup="finishToolbarSwipe"
             @pointercancel="toolbarTouch=null" @click.capture="preventSwipeClick">
             <div class="toolbar-controls">
@@ -567,7 +620,7 @@ onBeforeUnmount(() => {
               <div class="device-control-wrap" data-room-popover><button class="meeting-control" :class="{ enabled:camera }" :disabled="deviceBusy || mediaDevices.switching.value" @click="device('camera')" :aria-label="camera ? '关闭摄像头' : '开启摄像头'"><span class="control-symbol"><Transition name="control-icon"><Video v-if="camera" key="on" :size="20"/><VideoOff v-else key="off" :size="20"/></Transition></span><span>{{ camera ? '摄像头' : '摄像头关闭' }}</span></button><button class="device-arrow" aria-label="选择摄像头" :aria-expanded="deviceMenu==='videoinput'" @click="openDeviceMenu('videoinput',$event)"><ChevronUp :size="14"/></button>
                 <div v-if="deviceMenu==='videoinput'" class="device-popover"><strong>摄像头</strong><button :class="{chosen:!mediaDevices.selected.cameraId}" @click="selectDevice('videoinput','')">系统默认</button><button v-for="(item,index) in mediaDevices.devices.value.filter(d=>d.kind==='videoinput' && d.deviceId)" :key="item.deviceId" :class="{chosen:mediaDevices.selected.cameraId===item.deviceId}" @click="selectDevice('videoinput',item.deviceId)">{{ item.label || `摄像头 ${index+1}` }}</button></div>
               </div>
-              <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy || !!pendingShare" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
+              <button v-if="screenShareSupported" class="meeting-control" :class="{ enabled:sharing }" :disabled="deviceBusy || (!!handoff && !sharing)" @click="device('screen')" :aria-label="sharing ? '停止共享' : '共享屏幕'"><span class="control-symbol"><MonitorUp :size="20"/><i v-if="sharing" class="sharing-dot" aria-hidden="true"></i></span><span>{{ sharing ? '停止共享' : '共享屏幕' }}</span></button>
               <span v-else class="screen-unavailable">当前浏览器不支持屏幕共享</span>
               <button class="meeting-control desktop-obs-control" @click="obsDialog=true" aria-label="OBS 推流"><Settings2 :size="20"/><span>OBS</span></button>
               <div class="mobile-more-wrap" data-room-popover>
@@ -627,8 +680,9 @@ onBeforeUnmount(() => {
           </template>
           <template #presentation>
             <MeetingPresentationPanel :state="presentation" :members="members" :user-id="user.current.id" :host="isHost"
-              :connected="connection==='connected'" :can-share="screenShareSupported && mediaState==='connected'"
-              :busy="deviceBusy || !!pendingShare" :remaining="remaining" :overtime="overtime"
+              :connected="connection==='connected'" :compact="narrowScreen" :can-share="screenShareSupported" :media-ready="mediaState==='connected'"
+              :busy="deviceBusy || !!handoff" :handoff-phase="handoff?.phase" :handoff-note="handoffNote"
+              :remaining="remaining" :overtime="overtime"
               @action="sendPresentation" @takeover="acceptPresentation" @copy="value=>copy(value,'未回答问题已复制')" />
           </template>
         </MeetingSidePanel>

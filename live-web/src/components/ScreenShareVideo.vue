@@ -3,10 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Crosshair } from 'lucide-vue-next'
 import MediaTile from './MediaTile.vue'
 
-const props = defineProps({ track: Object, trackSid: String, canPoint: Boolean, points: Array })
-const emit = defineEmits(['point'])
-const container = ref(null), trigger = ref(null), target = ref(null)
-const armed = ref(false), bounds = ref(null)
+const props = defineProps({ track: Object, trackSid: String, canPoint: Boolean, armed: Boolean, points: Array })
+const emit = defineEmits(['point', 'update:armed'])
+const container = ref(null), controls = ref(null), trigger = ref(null), target = ref(null)
+const bounds = ref(null), preview = ref(null)
 const markers = computed(() => props.points?.filter(point => point.trackSid === props.trackSid) || [])
 let observer
 
@@ -23,31 +23,57 @@ function measure() {
 }
 
 function toggle() {
-  armed.value = !armed.value
-  if (armed.value) nextTick(() => target.value?.focus({ preventScroll: true }))
+  if (props.armed) { dismiss(true); return }
+  emit('update:armed', true)
+  nextTick(() => target.value?.focus({ preventScroll: true }))
 }
 
-function cancel(event) {
-  if (!armed.value) return
+function dismiss(restoreFocus = false) {
+  emit('update:armed', false)
+  preview.value = null
+  if (restoreFocus) trigger.value?.focus({ preventScroll: true })
+}
+function cancelWithEscape(event) {
+  if (!props.armed) return
   event.stopPropagation()
-  armed.value = false
-  trigger.value?.focus({ preventScroll: true })
+  event.preventDefault()
+  dismiss(true)
+}
+function cancelOutside(event) {
+  if (target.value?.contains(event.target) || controls.value?.contains(event.target)) return
+  dismiss()
 }
 
-function point(event) {
+function coordinate(event) {
   const rect = event.currentTarget.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) return
-  // Keyboard activation marks the center. Pointer coordinates use the visible video, excluding the bars.
-  const x = event.detail === 0 ? .5 : (event.clientX - rect.left) / rect.width
-  const y = event.detail === 0 ? .5 : (event.clientY - rect.top) / rect.height
-  if (x < 0 || x > 1 || y < 0 || y > 1) return
-  emit('point', { trackSid: props.trackSid, x, y })
-  armed.value = false
-  if (event.detail === 0) trigger.value?.focus({ preventScroll: true })
+  if (!rect.width || !rect.height) return null
+  const x = (event.clientX - rect.left) / rect.width
+  const y = (event.clientY - rect.top) / rect.height
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null
+}
+function aim(event) {
+  if (event.pointerType === 'mouse') preview.value = coordinate(event)
+}
+function point(event) {
+  const keyboard = event.detail === 0
+  const position = keyboard ? { x: .5, y: .5 } : coordinate(event)
+  if (!position) return
+  emit('point', { trackSid: props.trackSid, ...position })
+  dismiss(keyboard)
+}
+function positionStyle(point) {
+  return { left: `${point.x * 100}%`, top: `${point.y * 100}%` }
 }
 
-watch(() => props.track, () => { bounds.value = null; armed.value = false })
-watch(() => props.canPoint, value => { if (!value) armed.value = false })
+watch(() => props.track, () => { bounds.value = null; if (props.armed) dismiss() })
+watch(() => props.canPoint && !!bounds.value, enabled => { if (!enabled && props.armed) dismiss() })
+watch(() => props.armed, armed => {
+  if (armed) document.addEventListener('pointerdown', cancelOutside, true)
+  else {
+    document.removeEventListener('pointerdown', cancelOutside, true)
+    preview.value = null
+  }
+})
 onMounted(() => {
   if (typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(measure)
@@ -58,19 +84,26 @@ onMounted(() => {
 onBeforeUnmount(() => {
   observer?.disconnect()
   window.removeEventListener('resize', measure)
+  document.removeEventListener('pointerdown', cancelOutside, true)
+  if (props.armed) emit('update:armed', false)
 })
 </script>
 
 <template>
-  <div ref="container" class="screen-share-video" @keydown.esc="cancel">
+  <div ref="container" class="screen-share-video" @keydown.esc="cancelWithEscape">
     <MediaTile :track="track" :muted="true" @loadedmetadata="measure" @resize="measure" />
-    <div v-if="bounds" class="screen-point-area" :style="bounds">
+    <div v-if="bounds" class="screen-point-area" :style="bounds" :class="{ armed }">
       <button v-if="armed" ref="target" class="screen-point-target" aria-label="在共享画面中央放置标记"
-        @pointerdown.stop @click.stop="point"></button>
+        @pointerdown.stop @pointermove="aim" @pointerleave="preview = null" @pointercancel="preview = null"
+        @click.stop="point"></button>
+      <span v-if="armed && preview" class="screen-point-preview" aria-hidden="true" :style="positionStyle(preview)"></span>
       <span v-for="marker in markers" :key="marker.id" aria-hidden="true" class="screen-point-marker"
-        :style="{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }"><i></i></span>
+        :class="{ pending: marker.pending }" :style="positionStyle(marker)"><i></i></span>
     </div>
-    <button v-if="canPoint && bounds" ref="trigger" class="screen-point-button" :aria-pressed="armed"
-      @pointerdown.stop @click.stop="toggle"><Crosshair :size="16" /> {{ armed ? '点击画面标记 · 取消' : '标记位置' }}</button>
+    <div v-if="canPoint && bounds" ref="controls" class="screen-point-controls">
+      <button ref="trigger" class="screen-point-button" :aria-pressed="armed"
+        @pointerdown.stop @click.stop="toggle"><Crosshair :size="16" aria-hidden="true" /> {{ armed ? '取消标记' : '标记位置' }}</button>
+      <Transition name="point-hint"><span v-if="armed" class="screen-point-hint">点一下共享画面</span></Transition>
+    </div>
   </div>
 </template>

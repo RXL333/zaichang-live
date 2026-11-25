@@ -13,7 +13,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:tab', 'close'])
 const id = useId()
-const panel = ref(null)
+const panel = ref(null), presentationPane = ref(null)
 const tabs = computed(() => props.presentationTools ? ['members', 'chat', 'presentation'] : ['members', 'chat'])
 const dragOffset = ref(0), dragging = ref(false)
 let pointer = null
@@ -26,6 +26,9 @@ function focusTab(tab = props.tab) {
 watch(() => props.drawerOpen, open => {
   if (open) focusTab()
   else cancelDrag()
+}, { flush: 'post' })
+watch(() => props.invited && props.tab === 'presentation' && (!props.compact || props.drawerOpen), visible => {
+  if (visible && presentationPane.value) presentationPane.value.scrollTop = 0
 }, { flush: 'post' })
 
 function selectTab(tab) {
@@ -124,7 +127,7 @@ function closeFromHandle(event) {
       class="side-pane members-panel" tabindex="0"><slot name="members" /></section>
     <section v-show="tab === 'chat'" :id="`${id}-chat`" role="tabpanel" :aria-labelledby="`${id}-chat-tab`"
       class="side-pane chat-panel" tabindex="0"><slot name="chat" /></section>
-    <section v-if="presentationTools" v-show="tab === 'presentation'" :id="`${id}-presentation`" role="tabpanel"
+    <section v-if="presentationTools" v-show="tab === 'presentation'" :id="`${id}-presentation`" ref="presentationPane" role="tabpanel"
       :aria-labelledby="`${id}-presentation-tab`" class="side-pane presentation-panel" tabindex="0"><slot name="presentation" /></section>
   </aside>
 </template>

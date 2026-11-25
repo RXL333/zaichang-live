@@ -43,7 +43,12 @@ async function mockBackend(page,{hostControls=false,presentationTools=false,onMe
 test('presentation editor, media handoff, question export and screen point coordinates',async({page,context})=>{
   await context.grantPermissions(['clipboard-read','clipboard-write'])
   await page.setViewportSize({width:1280,height:780})
-  let presentation, sentPoint
+  await page.addInitScript(()=>{
+    window.meetingTestScreenPicker=()=>new Promise((resolve,reject)=>{
+      window.finishScreenPicker=allowed=>allowed ? resolve() : reject(new DOMException('Picker dismissed','NotAllowedError'))
+    })
+  })
+  let presentation, sentPoint, confirmTakeover, echoPoint
   function update(socket,values){
     presentation={...presentation,...values,serverNow:Date.now()}
     socket.send(JSON.stringify(presentation))
@@ -51,7 +56,7 @@ test('presentation editor, media handoff, question export and screen point coord
   await mockBackend(page,{hostControls:true,presentationTools:true,onMeetingMessage(event,socket){
     if(event.type==='SCREEN_POINT'){
       sentPoint=event
-      socket.send(JSON.stringify(event))
+      echoPoint=()=>socket.send(JSON.stringify(event))
     }
     if(event.action==='SAVE'){
       update(socket,{
@@ -61,10 +66,16 @@ test('presentation editor, media handoff, question export and screen point coord
       })
     }
     if(event.action==='INVITE')update(socket,{invitedId:event.segmentId,editable:false})
-    if(event.action==='ACCEPT')update(socket,{
-      currentId:event.segmentId,invitedId:'',nextId:'',deadline:Date.now()+300_000,
-      paceCounts:{following:2,slower:1,working:0},
-    })
+    if(event.action==='ACCEPT')confirmTakeover=(accepted=true)=>{
+      if(!accepted){
+        socket.send(JSON.stringify({type:'PRESENTATION_ERROR',action:'ACCEPT',message:'请重新接手。'}))
+        return
+      }
+      update(socket,{
+        currentId:event.segmentId,invitedId:'',nextId:'',deadline:Date.now()+300_000,
+        paceCounts:{following:2,slower:1,working:0},
+      })
+    }
     if(event.action==='QUESTION')update(socket,{questions:[
       {id:event.questionId,segmentId:event.segmentId,author:'测试成员',content:event.content,elapsedMs:8000},
     ]})
@@ -76,17 +87,53 @@ test('presentation editor, media handoff, question export and screen point coord
   await page.getByLabel('环节名称').fill('设计评审')
   await page.getByRole('button',{name:'保存议程'}).click()
   await page.getByRole('button',{name:'邀请首位汇报人'}).click()
-  await expect(page.getByRole('heading',{name:'轮到你汇报了'})).toBeVisible()
-  await page.getByRole('button',{name:'确认并共享'}).click()
+  const offer=page.getByRole('region',{name:'接力邀请'})
+  const share=offer.getByRole('button',{name:'接手并共享'})
+  await expect(offer.getByRole('heading',{name:'设计评审'})).toBeVisible()
+  await share.click()
+  await expect(offer.getByRole('status')).toHaveText('请在浏览器中选择要共享的画面。')
+  await page.evaluate(()=>window.finishScreenPicker(false))
+  await expect(offer.getByRole('status')).toContainText('共享未开启')
+  expect(confirmTakeover).toBeUndefined()
+  await share.click()
+  await page.evaluate(()=>window.finishScreenPicker(true))
+  await expect(offer.getByRole('status')).toHaveText('正在接手汇报…')
+  await expect(share).toBeDisabled()
+  await expect.poll(()=>typeof confirmTakeover).toBe('function')
+  confirmTakeover(false)
+  await expect(offer.getByRole('status')).toHaveText('请重新接手。')
+  await expect(page.getByRole('button',{name:'共享屏幕',exact:true})).toBeVisible()
+  confirmTakeover=undefined
+  await share.click()
+  await page.evaluate(()=>window.finishScreenPicker(true))
+  await expect.poll(()=>typeof confirmTakeover).toBe('function')
+  confirmTakeover()
   await expect(page.getByRole('button',{name:'停止共享'})).toBeVisible()
+  await expect(page.locator('.presentation-now h2')).toBeFocused()
   await expect(page.getByLabel('节奏反馈')).toContainText('请慢一点')
   await expect(page.locator('.presentation-brief')).toContainText('设计评审')
 
   await page.getByRole('button',{name:'标记位置'}).click()
   const markTarget=page.getByRole('button',{name:'在共享画面中央放置标记'})
+  await expect(markTarget).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button',{name:'标记位置'})).toBeFocused()
+  await page.getByRole('button',{name:'标记位置'}).click()
+  await page.getByRole('button',{name:'演讲者',exact:true}).click()
+  await expect(markTarget).toHaveCount(0)
+  expect(sentPoint).toBeUndefined()
+  await page.getByRole('button',{name:'标记位置'}).click()
   const rect=await markTarget.boundingBox()
+  await page.mouse.move(rect.x+rect.width*.29,rect.y+rect.height*.71)
+  await expect(page.locator('.screen-point-preview')).toBeVisible()
+  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-pointer-polish.png'})
   await page.mouse.click(rect.x+rect.width*.29,rect.y+rect.height*.71)
-  await expect(page.locator('.screen-point-marker')).toBeVisible()
+  const marker=page.locator('.screen-point-marker')
+  await expect(marker).toHaveClass(/pending/)
+  await expect.poll(()=>typeof echoPoint).toBe('function')
+  echoPoint()
+  await expect(marker).not.toHaveClass(/pending/)
+  await expect(marker).toHaveCount(1)
   expect(sentPoint.trackSid).toBe('TR_test_screen')
   expect(sentPoint.x).toBeCloseTo(.29,2)
   expect(sentPoint.y).toBeCloseTo(.71,2)
@@ -97,7 +144,7 @@ test('presentation editor, media handoff, question export and screen point coord
   await expect(page.getByLabel('向「设计评审」提问')).toBeEmpty()
   await page.getByRole('button',{name:'复制未回答问题'}).click()
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('[00:08] 测试成员　什么时候验收？')
-  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-desktop-check.png'})
+  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-desktop-polish.png'})
   await page.getByRole('button',{name:'标为已回答'}).click()
   await expect(page.getByText('已回答',{exact:true})).toBeVisible()
 
@@ -105,9 +152,57 @@ test('presentation editor, media handoff, question export and screen point coord
   await page.locator('.presentation-brief').click()
   const drawer=page.getByRole('dialog',{name:'会议互动'})
   await expect(drawer.getByRole('tab',{name:'汇报'})).toBeFocused()
-  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-mobile-check.png',animations:'disabled'})
+  if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-mobile-polish.png',animations:'disabled'})
   await page.keyboard.press('Escape')
   await expect(page.locator('.presentation-brief')).toBeFocused()
+})
+
+test.describe('touch presentation',()=>{
+  test.use({hasTouch:true})
+
+  test('stage shortcut opens the handoff and accepting brings back the shared screen',async({page})=>{
+    await page.setViewportSize({width:375,height:667})
+    await page.emulateMedia({reducedMotion:'reduce'})
+    const agenda=[{id:'talk',title:'方案汇报',presenterId:'user-1',presenter:'测试成员',minutes:3}]
+    let sentPoint
+    const sockets=await mockBackend(page,{hostControls:true,presentationTools:true,onMeetingMessage(event,socket){
+      if(event.action==='ACCEPT')sendState(socket,{
+        currentId:event.segmentId,deadline:Date.now()+180_000,paceCounts:{following:0,slower:0,working:0},
+      })
+      if(event.type==='SCREEN_POINT'){sentPoint=event;socket.send(JSON.stringify(event))}
+    }})
+    function sendState(socket,values){
+      socket.send(JSON.stringify({
+        type:'PRESENTATION_STATE',agenda,currentId:'',invitedId:'',nextId:'',readyIds:[],skippedIds:[],
+        deadline:0,serverNow:Date.now(),questions:[],...values,
+      }))
+    }
+
+    await page.goto('/meeting/123456789')
+    await page.getByRole('button',{name:'汇报',exact:true}).tap()
+    const drawer=page.getByRole('dialog',{name:'会议互动'})
+    await expect(drawer.getByRole('tab',{name:'汇报'})).toBeFocused()
+    const stage=page.locator('.meeting-stage')
+    const stageBounds=await stage.boundingBox()
+    sendState(sockets[0],{invitedId:'talk',nextId:'talk'})
+    const offer=drawer.getByRole('region',{name:'接力邀请'})
+    const accept=offer.getByRole('button',{name:'接手并共享'})
+    await expect(accept).toBeInViewport()
+    if(process.env.PRESENTATION_SCREENSHOTS)await page.screenshot({path:'../output/presentation-handoff-polish.png',animations:'disabled'})
+    await accept.tap()
+    await expect(drawer).toHaveCount(0)
+    await expect(page.locator('.presentation-brief')).toBeFocused()
+    expect(await stage.boundingBox()).toEqual(stageBounds)
+    await page.getByRole('button',{name:'标记位置'}).tap()
+    const target=page.getByRole('button',{name:'在共享画面中央放置标记'})
+    const bounds=await target.boundingBox()
+    await page.touchscreen.tap(bounds.x+bounds.width*.35,bounds.y+bounds.height*.42)
+    await expect(page.locator('.screen-point-marker')).toHaveCSS('animation-name','none')
+    await expect(target).toHaveCount(0)
+    expect(sentPoint.x).toBeCloseTo(.35,2)
+    expect(sentPoint.y).toBeCloseTo(.42,2)
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+  })
 })
 
 async function tabTo(page,selector){

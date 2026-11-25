@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Check, Clock3, Copy, ListOrdered, MonitorUp, Plus, X } from 'lucide-vue-next'
+import { computed, nextTick, ref, watch } from 'vue'
+import { ArrowDown, ArrowRight, ArrowUp, Check, Clock3, Copy, ListOrdered, MonitorUp, Plus, X } from 'lucide-vue-next'
 import { formatPresentationTime, unansweredSummary } from '../meetingPresentation'
 
 const props = defineProps({
@@ -10,7 +10,11 @@ const props = defineProps({
   host: Boolean,
   connected: Boolean,
   canShare: Boolean,
+  mediaReady: Boolean,
   busy: Boolean,
+  compact: Boolean,
+  handoffPhase: String,
+  handoffNote: String,
   remaining: String,
   overtime: Boolean,
 })
@@ -19,6 +23,8 @@ const emit = defineEmits(['action', 'takeover', 'copy'])
 const section = ref('agenda')
 const editing = ref(false), draft = ref([])
 const question = ref(''), lastSent = ref(null)
+const currentHeading = ref(null)
+let requestedSegment
 let rowKey = 0
 
 const agenda = computed(() => props.state?.agenda || [])
@@ -29,6 +35,11 @@ const invited = computed(() => props.state?.invitedId ? next.value : null)
 const ownTurn = computed(() => next.value?.presenterId === props.userId)
 const ready = computed(() => props.state?.readyIds.includes(next.value?.id))
 const upcomingName = computed(() => next.value && name(next.value))
+const upcomingOnline = computed(() => props.members.some(member => member.userId === next.value?.presenterId))
+const handoffMessage = computed(() => ({
+  selecting: '请在浏览器中选择要共享的画面。',
+  confirming: '正在接手汇报…',
+})[props.handoffPhase] || props.handoffNote || (props.canShare && !props.mediaReady ? '音视频恢复后即可共享。' : ''))
 const questions = computed(() => props.state?.questions || [])
 const unanswered = computed(() => unansweredSummary(props.state))
 const questionGroups = computed(() => agenda.value.map(segment => ({
@@ -46,8 +57,12 @@ const validAgenda = computed(() => draft.value.length > 0 && draft.value.every(r
 
 watch(agendaKey, () => { editing.value = false })
 watch(canEdit, allowed => { if (!allowed) editing.value = false })
-watch(() => props.state?.invitedId, () => {
-  if (invited.value && ownTurn.value) section.value = 'agenda'
+watch(() => props.state?.currentId, async segmentId => {
+  if (!segmentId || segmentId !== requestedSegment) return
+  requestedSegment = null
+  if (props.compact) return
+  await nextTick()
+  if (currentHeading.value?.getClientRects().length) currentHeading.value.focus({ preventScroll: true })
 })
 watch(questions, items => {
   if (lastSent.value && items.some(item => item.id === lastSent.value.id)) {
@@ -81,6 +96,11 @@ function move(index, direction) {
 }
 function send(action, fields) {
   if (props.connected) emit('action', { action, ...fields })
+}
+function takeOver(withScreen) {
+  if (props.busy || !props.connected || (withScreen && !props.mediaReady)) return
+  requestedSegment = invited.value.id
+  emit('takeover', requestedSegment, withScreen)
 }
 function save() {
   if (validAgenda.value) send('SAVE', { agenda: draft.value.map(({ title, presenterId, minutes }) => ({ title, presenterId, minutes })) })
@@ -129,32 +149,64 @@ function ask() {
       </div>
     </form>
     <template v-else>
-      <div v-if="current" class="presentation-now" :class="{ overtime }">
-        <div>
-          <span>正在汇报 · {{ name(current) }}</span>
-          <h2>{{ current.title }}</h2>
+      <section v-if="invited && ownTurn" :key="'invite-' + invited.id" class="presentation-handoff" aria-label="接力邀请">
+        <div class="presentation-handoff-heading">
+          <span class="presentation-handoff-icon"><ArrowRight :size="17" aria-hidden="true" /></span>
+          <div>
+            <span>轮到你汇报了</span>
+            <h2>{{ invited.title }}</h2>
+          </div>
+          <span class="presentation-minutes">{{ invited.minutes }} 分钟</span>
         </div>
-        <span class="presentation-clock" :aria-label="`${overtime ? '超时' : '剩余'} ${remaining}`"><Clock3 :size="14" /> {{ remaining }}</span>
+        <div class="presentation-actions presentation-takeover">
+          <button v-if="canShare" class="presentation-button primary" :aria-disabled="!connected || busy || !mediaReady"
+            @click="takeOver(true)"><MonitorUp :size="16" aria-hidden="true" /> 接手并共享</button>
+          <button class="presentation-button" :class="{ primary: !canShare }" :aria-disabled="!connected || busy"
+            @click="takeOver(false)">{{ canShare ? '直接开始' : '开始汇报' }}</button>
+        </div>
+        <p role="status" class="presentation-handoff-status">{{ handoffMessage }}</p>
+        <button v-if="host" class="presentation-button presentation-skip" :disabled="!connected || busy"
+          @click="send('SKIP', { segmentId: invited.id })">跳过此环节</button>
+      </section>
+      <div v-if="current" :key="current.id" class="presentation-now" :class="{ overtime }">
+        <div>
+          <span>{{ current.presenterId === userId ? '你正在汇报' : `${name(current)} 正在汇报` }}</span>
+          <h2 ref="currentHeading" tabindex="-1">{{ current.title }}</h2>
+        </div>
+        <span class="presentation-clock" :aria-label="`${overtime ? '超时' : '剩余'} ${remaining}`"><Clock3 :size="14" aria-hidden="true" /> {{ remaining }}</span>
       </div>
-      <section v-if="invited && ownTurn" class="presentation-handoff" aria-label="接力邀请">
-        <h2>轮到你汇报了</h2>
-        <p>{{ invited.title }} · {{ invited.minutes }} 分钟</p>
-        <div class="presentation-actions">
-          <button v-if="canShare" class="presentation-button primary" :disabled="!connected || busy"
-            @click="emit('takeover', invited.id, true)"><MonitorUp :size="16" /> 确认并共享</button>
-          <button class="presentation-button" :class="{ primary: !canShare }" :disabled="!connected || busy"
-            @click="emit('takeover', invited.id, false)">{{ canShare ? '仅开始汇报' : '开始汇报' }}</button>
+      <section v-if="next && !(invited && ownTurn)" class="presentation-next" aria-label="下一位汇报人">
+        <div class="presentation-next-heading">
+          <div>
+            <p>{{ invited ? '等待接手' : '下一位' }} · {{ ownTurn ? '你' : upcomingName }}</p>
+            <h2>{{ next.title }}</h2>
+          </div>
+          <span v-if="!invited && !upcomingOnline" class="presentation-minutes">离线</span>
+          <span v-else-if="ready && !invited && !ownTurn" class="presentation-ready"><Check :size="13" aria-hidden="true" /> 已准备</span>
+        </div>
+        <div v-if="canEdit || host || (ownTurn && !invited)" class="presentation-actions">
+          <button v-if="ownTurn && !invited" class="presentation-button" :aria-disabled="!connected || ready" :aria-pressed="ready"
+            @click="!ready && send('READY', { segmentId: next.id })">
+            <Check :size="15" aria-hidden="true" /> {{ ready ? '准备就绪' : '已准备好' }}
+          </button>
+          <button v-if="host && !invited" class="presentation-button primary" :disabled="!connected"
+            @click="send('INVITE', { segmentId: next.id })">{{ current ? '邀请下一位' : '邀请首位汇报人' }}</button>
+          <button v-if="host && invited" class="presentation-button presentation-skip" :disabled="!connected"
+            @click="send('SKIP', { segmentId: invited.id })">跳过此环节</button>
+          <button v-if="canEdit" class="presentation-button" :disabled="!connected" @click="edit">编辑议程</button>
         </div>
       </section>
       <section v-if="current" class="presentation-pace" aria-label="节奏反馈">
         <strong>节奏反馈</strong>
         <div v-if="state.paceCounts" class="pace-counts">
-          <span v-for="option in paceOptions" :key="option.id"><b>{{ state.paceCounts[option.id] }}</b>{{ option.label }}</span>
+          <span v-for="option in paceOptions" :key="option.id"><b :key="state.paceCounts[option.id]">{{ state.paceCounts[option.id] }}</b>{{ option.label }}</span>
         </div>
         <div v-if="current.presenterId !== userId" class="pace-options">
           <button v-for="option in paceOptions" :key="option.id" class="presentation-button"
             :aria-pressed="state.ownPace === option.id" :disabled="!connected"
-            @click="send('PACE', { segmentId: current.id, value: option.id })">{{ option.label }}</button>
+            @click="send('PACE', { segmentId: current.id, value: option.id })">
+            <Check v-if="state.ownPace === option.id" :size="13" aria-hidden="true" /> {{ option.label }}
+          </button>
         </div>
       </section>
       <div class="presentation-sections" aria-label="汇报内容">
@@ -163,7 +215,8 @@ function ask() {
       </div>
       <template v-if="section === 'agenda'">
         <ol class="presentation-agenda">
-          <li v-for="(segment, index) in agenda" :key="segment.id" :class="{ current: segment.id === state.currentId }">
+          <li v-for="(segment, index) in agenda" :key="segment.id"
+            :class="{ current: segment.id === state.currentId }" :aria-current="segment.id === state.currentId ? 'step' : undefined">
             <span class="presentation-index">{{ index + 1 }}</span>
             <div>
               <strong>{{ segment.title }}</strong>
@@ -172,21 +225,9 @@ function ask() {
             <small v-if="status(segment, index)">{{ status(segment, index) }}</small>
           </li>
         </ol>
-        <div v-if="!state.finished" class="presentation-next">
-          <p v-if="invited && !ownTurn">等待 {{ upcomingName }} 接手</p>
-          <p v-else-if="next && !invited">下一位 · {{ upcomingName }}</p>
-          <div class="presentation-actions">
-            <button v-if="next && ownTurn && !invited" class="presentation-button" :disabled="!connected || ready"
-              @click="send('READY', { segmentId: next.id })"><Check :size="15" /> {{ ready ? '准备就绪' : '已准备好' }}</button>
-            <button v-if="canEdit" class="presentation-button" :disabled="!connected" @click="edit">编辑议程</button>
-            <button v-if="host && next && !invited" class="presentation-button primary" :disabled="!connected"
-              @click="send('INVITE', { segmentId: next.id })">{{ current ? '邀请下一位' : '邀请首位汇报人' }}</button>
-            <button v-if="host && invited" class="presentation-button" :disabled="!connected || busy"
-              @click="send('SKIP', { segmentId: invited.id })">跳过此环节</button>
-            <button v-if="host && !next" class="presentation-button" :disabled="!connected" @click="send('FINISH')">结束接力</button>
-          </div>
-        </div>
-        <p v-else class="presentation-next">汇报已结束</p>
+        <button v-if="host && !state.finished && !next" class="presentation-button" :disabled="!connected"
+          @click="send('FINISH')">结束接力</button>
+        <p v-if="state.finished">汇报已结束</p>
       </template>
       <template v-else>
         <form v-if="current && questions.length < 50" class="presentation-question-form" @submit.prevent="ask">
@@ -197,12 +238,14 @@ function ask() {
         <button v-if="host && unanswered" class="presentation-button" @click="emit('copy', unanswered)"><Copy :size="15" /> 复制未回答问题</button>
         <section v-for="{ segment, items } in questionGroups" :key="segment.id" class="presentation-question-group">
           <h3>{{ segment.title }}</h3>
-          <article v-for="item in items" :key="item.id">
-            <header><span>{{ item.author }}</span><time :title="'距会议创建的时间'">{{ formatPresentationTime(item.elapsedMs) }}</time></header>
-            <p>{{ item.content }}</p>
-            <small v-if="item.answered"><Check :size="13" /> 已回答</small>
-            <button v-else-if="host" class="presentation-button" :disabled="!connected" @click="send('ANSWER', { questionId: item.id })">标为已回答</button>
-          </article>
+          <TransitionGroup name="presentation-question" tag="div" class="presentation-question-items">
+            <article v-for="item in items" :key="item.id">
+              <header><span>{{ item.author }}</span><time title="距会议开始">{{ formatPresentationTime(item.elapsedMs) }}</time></header>
+              <p>{{ item.content }}</p>
+              <small v-if="item.answered"><Check :size="13" aria-hidden="true" /> 已回答</small>
+              <button v-else-if="host" class="presentation-button" :disabled="!connected" @click="send('ANSWER', { questionId: item.id })">标为已回答</button>
+            </article>
+          </TransitionGroup>
         </section>
       </template>
     </template>

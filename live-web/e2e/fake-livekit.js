@@ -6,9 +6,11 @@ export class Room {
   constructor(){
     this.handlers=new Map();this.remoteParticipants=new Map();this.canPlaybackAudio=true
     this.localParticipant={identity:'user.user-1.session',connectionQuality:'good',isSpeaking:false,trackPublications:new Map(),isCameraEnabled:false,isMicrophoneEnabled:false,isScreenShareEnabled:false}
+    this.localParticipant.getTrackPublication=source=>[...this.localParticipant.trackPublications.values()].find(track=>track.source===source)
     this.localParticipant.setMicrophoneEnabled=async value=>{this.localParticipant.isMicrophoneEnabled=value}
     this.localParticipant.setCameraEnabled=async value=>{this.localParticipant.isCameraEnabled=value}
     this.localParticipant.setScreenShareEnabled=async value=>{
+      if(value)await globalThis.meetingTestScreenPicker?.()
       this.localParticipant.isScreenShareEnabled=value
       const sid='TR_test_screen'
       if(value){

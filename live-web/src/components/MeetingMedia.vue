@@ -18,6 +18,7 @@ const emit=defineEmits(['invite','point'])
 const audioContainer=ref(null),revision=ref(0),canPlay=ref(true)
 const tilesContainer=ref(null)
 const view=ref('gallery'),pinned=ref(''),screenFocus=ref(''),page=ref(1)
+const pointingAt=ref('')
 const speakers=useSpeakerActivity()
 let listeners=[],audioTracks=[],pressTimer
 function uid(identity){return (identity||'').split('.')[1]||''}
@@ -99,6 +100,10 @@ function prepareTileLeave(el){
 function togglePin(tile){screenFocus.value='';pinned.value=pinned.value===tile.key?'':tile.key;if(pinned.value){view.value='speaker';page.value=1}}
 function startPress(event,tile){if(event.pointerType!=='touch')return;clearTimeout(pressTimer);pressTimer=setTimeout(()=>togglePin(tile),550)}
 function endPress(){clearTimeout(pressTimer);pressTimer=null}
+function setPointMode(trackSid,armed){
+  if(armed)pointingAt.value=trackSid
+  else if(pointingAt.value===trackSid)pointingAt.value=''
+}
 watch(()=>tiles.value.map(tile=>tile.key),keys=>{if(pinned.value && !keys.includes(pinned.value))pinned.value='';if(page.value>pageCount.value)page.value=pageCount.value})
 watch(()=>tiles.value.filter(tile=>tile.screen).map(tile=>tile.key),(current,previous=[])=>{
   const added=current.find(key=>!previous.includes(key))
@@ -112,13 +117,16 @@ onBeforeUnmount(()=>{endPress();unsubscribe(props.room)})
 <template>
   <div class="meeting-stage" :class="{ 'stage-screen': tiles.some(tile=>tile.screen), 'stage-single': tiles.length===1 }">
     <div ref="audioContainer" class="audio-renderers" aria-hidden="true"></div>
+    <slot name="stage-action" />
     <div v-if="!tiles.length" class="meeting-stage-empty"><LogoMark /><strong>{{ mediaState==='connecting' ? '正在连接会议' : '等待成员加入' }}</strong><p>{{ mediaState==='connecting' ? '音视频连接中，请稍候。' : '成员加入后，画面会显示在这里。' }}</p></div>
     <template v-else>
       <div class="stage-views" aria-label="画面布局"><button :class="{active:view==='gallery'}" :aria-pressed="view==='gallery'" @click="setView('gallery')">画廊</button><button :class="{active:view==='speaker'}" :aria-pressed="view==='speaker'" @click="setView('speaker')">演讲者</button></div>
       <TransitionGroup ref="tilesContainer" tag="div" name="tile-motion" class="conference-tiles" :class="[layout,view==='speaker'?'speaker-layout':'gallery-layout',{'single-speaker':visible.length===1}]" :style="{'--thumbnail-count':Math.max(1,visible.length-1)}" @before-leave="prepareTileLeave">
         <div v-for="tile in tiles" v-show="visibleKeys.has(tile.key)" :key="tile.key" :data-tile-key="tile.key" class="conference-tile" :class="{ 'screen-share-tile':tile.screen, 'camera-on':!!tile.track, speaking:tile.speaking, 'speaking-primary':tile.speaking && speakers.recent.value===tile.userId, 'tile-primary':view==='speaker' && tile.key===primary?.key }" @pointerdown="startPress($event,tile)" @pointerup="endPress" @pointercancel="endPress" @pointerleave="endPress" @contextmenu.prevent>
           <ScreenShareVideo v-if="tile.screen" :track="tile.track" :track-sid="tile.trackSid" :points="points"
-            :can-point="canPoint && !!tile.trackSid && (view==='gallery' || tile.key===primary?.key)" @point="emit('point',$event)" />
+            :can-point="canPoint && !!tile.trackSid && visibleKeys.has(tile.key) && (view==='gallery' || tile.key===primary?.key)"
+            :armed="!!tile.trackSid && pointingAt===tile.trackSid" @update:armed="setPointMode(tile.trackSid,$event)"
+            @point="emit('point',$event)" />
           <MediaTile v-else-if="tile.track" :track="tile.track" :muted="true"/><div v-else class="tile-avatar" :style="avatarStyle(tile.userId)">{{ tile.name?.slice(0,1) || '会' }}</div>
           <button class="tile-pin" :aria-label="`${pinned===tile.key?'取消固定':'固定'}${tile.screen ? tile.name+'的屏幕' : tile.name}`" :aria-pressed="pinned===tile.key" @pointerdown.stop @click.stop="togglePin(tile)"><PinOff v-if="pinned===tile.key" :size="15"/><Pin v-else :size="15"/></button>
           <span class="tile-quality" :class="`quality-${tile.quality}`" :aria-label="`连接质量：${connectionQualityLabel(tile.quality)}`">{{ connectionQualityLabel(tile.quality) }}</span>
