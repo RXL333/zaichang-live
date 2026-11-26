@@ -5,8 +5,23 @@ export function meetingUrl(number, { origin = location.origin, base = import.met
   return hash ? `${root.href}#/join/${number}` : `${root.href}join/${number}`
 }
 
-export function invitationText(meeting, url = meetingUrl(meeting.number)) {
+const MAX_AGENDA_LINES = 10
+
+export function agendaLines(agenda) {
+  if (!Array.isArray(agenda) || !agenda.length) return []
+  const rows = agenda.slice(0, MAX_AGENDA_LINES).map((segment, index) => {
+    const parts = [String(segment.title ?? '').trim() || '未命名环节']
+    if (segment.presenter) parts.push(segment.presenter)
+    if (Number.isFinite(segment.minutes)) parts.push(`${segment.minutes} 分钟`)
+    return `${index + 1}. ${parts.join('｜')}`
+  })
+  if (agenda.length > MAX_AGENDA_LINES) rows.push(`…另有 ${agenda.length - MAX_AGENDA_LINES} 个环节`)
+  return ['汇报议程：', ...rows]
+}
+
+export function invitationText(meeting, url = meetingUrl(meeting.number), agenda = []) {
   const lines = [`会议主题：${meeting.title}`, `会议号：${groupNumber(meeting.number)}`, `加入链接：${url}`]
+  lines.push(...agendaLines(agenda))
   if (meeting.hasPassword) lines.push('会议已设置密码，请向主持人获取')
   return lines.join('\n')
 }

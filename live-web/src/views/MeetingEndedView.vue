@@ -11,6 +11,9 @@ const state=typeof history !== 'undefined' ? history.state || {} : {}
 const title=typeof state.meetingTitle==='string' ? state.meetingTitle.slice(0,80) : ''
 const elapsed=Number.isFinite(state.elapsedSeconds) ? Math.max(0,Math.floor(state.elapsedSeconds)) : null
 const unanswered=typeof state.unanswered==='string' ? state.unanswered : ''
+const count=value=>Number.isFinite(value) ? Math.max(0,Math.floor(value)) : null
+const participants=count(state.participants),chatCount=count(state.chatCount)
+const summary=[participants!==null && participants>0 ? `${participants} 人参会` : '',chatCount!==null ? `${chatCount} 条聊天` : ''].filter(Boolean).join('，')
 const copyStatus=ref('')
 const status=ref(state.meetingEnded ? 'ended' : 'loading')
 const duration=computed(()=>elapsed===null ? '' : `${Math.floor(elapsed/60)} 分 ${elapsed%60} 秒`)
@@ -31,6 +34,7 @@ async function copyUnanswered(){
       <LogoMark /><p class="ended-eyebrow">会议记录</p><h1>{{ status==='ended' ? '会议已结束' : '已离开会议' }}</h1>
       <p>{{ title || '本次会议' }} <span class="meeting-number">{{ groupNumber(number) }}</span></p>
       <p v-if="duration">本次参会时长：{{ duration }}</p>
+      <p v-if="summary" class="ended-summary">本次会议：{{ summary }}</p>
       <p v-if="status==='loading'">正在确认会议状态…</p>
       <p v-if="status==='error'">暂时无法确认会议状态，请稍后重试。</p>
       <details v-if="status==='ended' && unanswered" class="ended-questions">

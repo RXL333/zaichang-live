@@ -17,4 +17,21 @@ describe('meeting invitations', () => {
     expect(text).not.toContain('secret-value')
     expect(invitationText({ title:'周会', number:'123456789', hasPassword:false }, url)).not.toContain('密码')
   })
+  it('lists the agenda with presenters and minutes, and still yields the same meeting number', () => {
+    const agenda = [{ title:'项目介绍', presenter:'林夏', minutes:5 }, { title:'', presenter:'', minutes:3 }]
+    const text = invitationText({ title:'答辩', number:'123456789', hasPassword:true }, url, agenda)
+    expect(text).toContain('汇报议程：\n1. 项目介绍｜林夏｜5 分钟\n2. 未命名环节｜3 分钟')
+    expect(text.indexOf('汇报议程')).toBeLessThan(text.indexOf('请向主持人获取'))
+    expect(extractMeetingNumber(text)).toBe('123456789')
+  })
+  it('omits the agenda block when there is none and caps long agendas', () => {
+    const base = { title:'周会', number:'123456789', hasPassword:false }
+    expect(invitationText(base, url, [])).not.toContain('汇报议程')
+    expect(invitationText(base, url)).not.toContain('汇报议程')
+    const long = Array.from({ length:12 }, (_, i) => ({ title:`环节${i + 1}`, presenter:'甲', minutes:2 }))
+    const text = invitationText(base, url, long)
+    expect(text).toContain('10. 环节10')
+    expect(text).not.toContain('11. ')
+    expect(text).toContain('…另有 2 个环节')
+  })
 })

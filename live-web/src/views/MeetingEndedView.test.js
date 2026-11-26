@@ -16,6 +16,18 @@ it('allows rejoining only after the server confirms the meeting is open',async()
   expect(wrapper.text()).toContain('1 分 5 秒')
   wrapper.unmount()
 })
+it('summarises participants and chat messages when the room provides them',async()=>{
+  history.replaceState({meetingEnded:true,elapsedSeconds:30,participants:4,chatCount:12},'','/')
+  const wrapper=mount(MeetingEndedView,{global:{stubs}})
+  expect(wrapper.text()).toContain('4 人参会，12 条聊天')
+  wrapper.unmount()
+})
+it('shows no summary line when the counts are missing or invalid',async()=>{
+  history.replaceState({meetingEnded:true,participants:'x'},'','/')
+  const wrapper=mount(MeetingEndedView,{global:{stubs}})
+  expect(wrapper.text()).not.toContain('本次会议：')
+  wrapper.unmount()
+})
 it('does not offer rejoining after the meeting ends',async()=>{
   history.replaceState({meetingEnded:true},'','/')
   const wrapper=mount(MeetingEndedView,{global:{stubs}})

@@ -37,7 +37,8 @@ const shortcutsDialog=ref(false)
 const deviceMenu=ref('')
 const networkQuality=ref('unknown'),qualityReduced=ref(false)
 const sideOpen=ref(false),moreOpen=ref(false),moreButton=ref(null),screenShareSupported=!!navigator.mediaDevices?.getDisplayMedia
-const unread=ref(0),waitingMessages=ref(0),narrowScreen=ref(false)
+const unread=ref(0),waitingMessages=ref(0),narrowScreen=ref(false),peakMembers=ref(0)
+watch(()=>members.value.length,count=>{if(count>peakMembers.value)peakMembers.value=count})
 const presentationTools=ref(false),presentation=ref(null),points=ref([])
 const handoff=shallowRef(null),handoffNote=ref(''),presentationBrief=ref(null)
 const presentationNow=ref(0)
@@ -150,7 +151,7 @@ function preventSwipeClick(event) {
   event.preventDefault()
   event.stopPropagation()
 }
-const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value) : '')
+const inviteUrl=computed(()=>meetingUrl(number)),inviteText=computed(()=>meeting.value ? invitationText(meeting.value,inviteUrl.value,presentation.value?.agenda) : '')
 async function copy(value,message='已复制'){try{await navigator.clipboard.writeText(value);flash(message)}catch{flash('复制失败，请手动选择内容复制')}}
 function nearChatBottom(){const list=chatList.value;return !list || list.scrollHeight-list.scrollTop-list.clientHeight<=80}
 function scrollChatBottom() {
@@ -311,6 +312,7 @@ function showEnded(meetingEnded=false){
   const unanswered=meetingEnded && isHost.value ? unansweredSummary(presentation.value) : ''
   router.push({path:`/ended/${number}`,state:{
     meetingTitle:meeting.value?.title || '',elapsedSeconds:Math.max(0,Math.floor((Date.now()-enteredAt)/1000)),meetingEnded,unanswered,
+    participants:Math.max(peakMembers.value,members.value.length),chatCount:messages.value.length,
   }})
 }
 function connectSocket(){
